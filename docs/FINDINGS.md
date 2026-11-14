@@ -728,8 +728,6 @@ Each of these was tried and verified not to help:
 - Unticking an ocarina leaves `ActionGuide_IsEnd.Navi` set (the D-pad stays, empty).
 - Collision view (gz's): shelved. The collision files are decoded (`tools/phive.py`); the plan, costs and format
   are in [COLLISION.md](COLLISION.md).
-- Frame advance freezes the picture while paused (MANUAL §7). The game's own pause is a request count in the pause
-  manager, and one type stops the world while the game keeps drawing (§9.1).
 - Leads in §9 not followed up yet: a player debug move state that may survive (levitate without searching for the
   physics record), the game's own debug line and triangle shaders (collision view, stage 2), and the scene's
   managers (a Link state name, the exit Link is nearest to, the map's collision, the explored room after a warp).
