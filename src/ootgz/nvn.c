@@ -1361,6 +1361,8 @@ static const float airwall_colours[AW_NCOLORS][4] = {
   [AW_SLOT_A] = { 1.0f, 0.40f, 0.85f, 1.0f }, /* pink: save slot A (savepos.c) */
   [AW_SLOT_B] = { 0.35f, 1.0f, 0.45f, 1.0f }, /* green: save slot B */
   [AW_LOAD] = { 1.0f, 0.95f, 0.30f, 1.0f },   /* yellow: where a load puts Link */
+  [AW_OCARINA] = { 1.0f, 0.50f, 0.10f, 1.0f },   /* orange: slot B if the ocarina were put away (savepos.c) */
+  [AW_OCARINA_LOAD] = { 0.95f, 0.95f, 0.95f, 1.0f }, /* white: where a load puts Link from it */
 };
 
 /* enemy health (enemyhp.c) */

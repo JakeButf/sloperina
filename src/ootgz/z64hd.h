@@ -89,6 +89,9 @@ struct z64hd_build {
   /* bool (actor, const float pos[3], float out[3], const void *riding, bool, int): the load's search for a safe
    * place round SavePos (FINDINGS 9.7); 0: not known for this build */
   uint32_t safety_search;
+  /* [main+this]: the event state the restart point update checks (+0x68: an event is running, FINDINGS 9.7);
+   * 0: not known for this build */
+  uint32_t event_state_ptr;
   struct z64hd_link_path link_paths[5];
 };
 

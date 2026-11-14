@@ -55,6 +55,8 @@ static const gpu_colour_t line_colours[AW_NCOLORS] = {
   [AW_SLOT_A] = { 1.0f, 0.42f, 0.86f, 1 }, /* pink: save slot A (savepos.c) */
   [AW_SLOT_B] = { 0.38f, 1.0f, 0.48f, 1 }, /* green: save slot B */
   [AW_LOAD] = { 1.0f, 0.95f, 0.32f, 1 },   /* yellow: where a load puts Link */
+  [AW_OCARINA] = { 1.0f, 0.52f, 0.12f, 1 },   /* orange: slot B if the ocarina were put away (savepos.c) */
+  [AW_OCARINA_LOAD] = { 0.95f, 0.95f, 0.95f, 1 }, /* white: where a load puts Link from it */
 };
 
 /* budget: the quads the lines may take. Short of them, the glows go first, then the farthest lines. */
