@@ -1318,6 +1318,109 @@ static bool draw_quad(nvn_obj_t *cmd, const quad_t *q, size_t at, size_t materia
   return true;
 }
 
+/* what the layer's passes share (gpuui_end's) */
+typedef struct {
+  nvn_obj_t *cmd;
+  size_t elements, materials, view_at;
+  int vy;               /* the visible area's y in the target */
+  bool after_composite; /* the picture was the target last: a barrier before the layer is again */
+} layer_pass_t;
+
+/* Only Link hides the lines drawn after this: the scene's depth is made his alone. Into the layer, his mask: what
+ * of the depth is in his box (in the rectangle, between the depths in front of and behind him); then the depth
+ * goes to the far plane wherever the mask isn't (a quad over it all at the far plane, discarded on the mask) */
+static void draw_link_mask(layer_pass_t *pass)
+{
+  nvn_obj_t *cmd = pass->cmd;
+  nvn_texture_t *layer_target = (nvn_texture_t *)&layer;
+  static const float clear[4] = { 0, 0, 0, 0 };
+  float sw = (float)frame_area.w, sh = (float)frame_area.h;
+  size_t extra = pass->elements + (size_t)(MAX_QUADS - LAYER_COLOURS - MASK_QUADS) * ELEMENT_SIZE;
+  g.cmd_barrier(cmd, BARRIER_ORDER_PRIMITIVES | BARRIER_ORDER_FRAGMENTS | BARRIER_INVALIDATE_ZCULL);
+  g.cmd_targets(cmd, 1, &layer_target, 0, frame_depth, 0);
+  g.cmd_viewport(cmd, 0, 0, layer_w, layer_h);
+  g.cmd_scissor(cmd, 0, 0, layer_w, layer_h);
+  gd.cmd_depth_range(cmd, 0, 1);
+  gd.cmd_clear_colour(cmd, 0, clear, CLEAR_ALL_CHANNELS);
+  if (frame_depth_clear) /* new: the far plane, before the game's depth is first copied in */
+    gd.cmd_clear_depth(cmd, 1, true, 0, 0);
+  bind_frame(cmd, pass->view_at);
+  draw_state_t st = { -1, -1, 0 };
+  float rx = frame_only.x0 * sw, ry = frame_only.y0 * sh, rw = (frame_only.x1 - frame_only.x0) * sw,
+        rh = (frame_only.y1 - frame_only.y0) * sh;
+  quad_t in_front = { .c = { { 1, 1, 1, 1 }, { 1, 1, 1, 1 }, { 1, 1, 1, 1 }, { 1, 1, 1, 1 } }, .w = rw, .h = rh,
+                      .scale = 1, .alpha = 1 };
+  set_translate(&in_front, rx, ry);
+  quad_t behind = in_front, ground;
+  for (int i = 0; i < 4; i++)
+    behind.c[i] = (gpu_colour_t){ 0, 0, 0, 1 };
+  ground = behind;
+  plane_z(&in_front, frame_only.front); /* white where the depth is at his front or beyond */
+  plane_z(&behind, frame_only.back);    /* black again where it's past his back */
+  plane_z(&ground, frame_only.ground);  /* and where it's at the ground or under it */
+  g.cmd_depth(cmd, &depth_tested);
+  draw_quad(cmd, &in_front, extra, pass->materials, &st);
+  g.cmd_depth(cmd, &depth_beyond);
+  draw_quad(cmd, &behind, extra + ELEMENT_SIZE, pass->materials, &st);
+  g.cmd_depth(cmd, &depth_tested);
+  draw_quad(cmd, &ground, extra + 3 * ELEMENT_SIZE, pass->materials, &st);
+  g.cmd_barrier(cmd, BARRIER_ORDER_PRIMITIVES | BARRIER_ORDER_FRAGMENTS | BARRIER_INVALIDATE_TEXTURE);
+  g.cmd_targets(cmd, 0, 0, 0, frame_depth, 0); /* the depth alone: the layer is read */
+  g.cmd_viewport(cmd, 0, 0, layer_w, layer_h);
+  g.cmd_scissor(cmd, 0, 0, layer_w, layer_h);
+  quad_t far = { .c = { { 1, 1, 1, 1 }, { 1, 1, 1, 1 }, { 1, 1, 1, 1 }, { 1, 1, 1, 1 } }, .w = sw, .h = sh,
+                 .textured = true, .image = IMAGE_LAYER, .material = MATERIAL_MASK, .scale = 1, .alpha = 1 };
+  set_translate(&far, 0, 0);
+  float t0 = frame_lower_left ? 1 : 0, t1 = 1 - t0;
+  float layer_st[8] = { 0, t0, 1, t0, 0, t1, 1, t1 };
+  __builtin_memcpy(far.st, layer_st, sizeof(layer_st));
+  far.m[11] = clip_z(1);
+  g.cmd_depth(cmd, &depth_far);
+  draw_quad(cmd, &far, extra + 2 * ELEMENT_SIZE, pass->materials, &st);
+  g.cmd_depth(cmd, &depth);
+  g.cmd_barrier(cmd, BARRIER_ORDER_PRIMITIVES | BARRIER_ORDER_FRAGMENTS | BARRIER_INVALIDATE_ZCULL);
+  pass->after_composite = false;
+}
+
+/* colour k's layer: cleared, its depth tested quads drawn into it against the frame's depth as it is now, then
+ * laid over the picture in that colour */
+static void draw_layer_colour(layer_pass_t *pass, int k)
+{
+  nvn_obj_t *cmd = pass->cmd;
+  nvn_texture_t *layer_target = (nvn_texture_t *)&layer;
+  static const float clear[4] = { 0, 0, 0, 0 };
+  float sw = (float)frame_area.w, sh = (float)frame_area.h;
+  if (pass->after_composite) /* the layer's last colour has been laid over the picture */
+    g.cmd_barrier(cmd, BARRIER_ORDER_PRIMITIVES | BARRIER_ORDER_FRAGMENTS);
+  g.cmd_targets(cmd, 1, &layer_target, 0, frame_depth, 0);
+  g.cmd_viewport(cmd, 0, 0, layer_w, layer_h);
+  g.cmd_scissor(cmd, 0, 0, layer_w, layer_h);
+  gd.cmd_clear_colour(cmd, 0, clear, CLEAR_ALL_CHANNELS);
+  bind_frame(cmd, pass->view_at);
+  g.cmd_depth(cmd, &depth_tested);
+  draw_state_t st = { -1, -1, 0 };
+  for (int i = 0; i < n_quads; i++)
+    if (quads[i].depth_tested && quads[i].layer == k &&
+        !draw_quad(cmd, &quads[i], pass->elements + (size_t)i * ELEMENT_SIZE, pass->materials, &st))
+      break;
+  g.cmd_depth(cmd, &depth);
+  g.cmd_barrier(cmd, BARRIER_ORDER_PRIMITIVES | BARRIER_ORDER_FRAGMENTS | BARRIER_INVALIDATE_TEXTURE);
+  /* over the picture, in its colour, the whole area */
+  g.cmd_targets(cmd, 1, &frame_target, 0, 0, 0);
+  g.cmd_viewport(cmd, frame_area.x, pass->vy, frame_area.w, frame_area.h);
+  g.cmd_scissor(cmd, frame_area.x, pass->vy, frame_area.w, frame_area.h);
+  gpu_colour_t c = layer_colours[k];
+  c.a = 1;
+  quad_t q = { .c = { c, c, c, c }, .w = sw, .h = sh, .textured = true, .image = IMAGE_LAYER, .scale = 1, .alpha = 1 };
+  set_translate(&q, 0, 0);
+  float t0 = frame_lower_left ? 1 : 0, t1 = 1 - t0;
+  float layer_st[8] = { 0, t0, 1, t0, 0, t1, 1, t1 };
+  __builtin_memcpy(q.st, layer_st, sizeof(layer_st));
+  st = (draw_state_t){ -1, -1, 0 };
+  draw_quad(cmd, &q, pass->elements + (size_t)(MAX_QUADS - LAYER_COLOURS + k) * ELEMENT_SIZE, pass->materials, &st);
+  pass->after_composite = true;
+}
+
 bool gpuui_end(nvn_obj_t *cmd, const void *game_texture_pool, const void *game_sampler_pool)
 {
   if (!ready || !n_quads)
@@ -1359,86 +1462,11 @@ bool gpuui_end(nvn_obj_t *cmd, const void *game_texture_pool, const void *game_s
   g.cmd_render_enable(cmd, true);
   /* the lines' layer a colour at a time: cleared, its depth tested quads drawn into it against that depth, then
    * over the picture */
-  /* Only Link hides the lines: the scene's depth is made his alone first. Into the layer, his mask: what of the
-   * depth is in his box (in the rectangle, between the depths in front of and behind him); then the depth goes
-   * to the far plane wherever the mask isn't (a quad over it all at the far plane, discarded on the mask) */
-  nvn_texture_t *layer_target = (nvn_texture_t *)&layer;
-  static const float clear[4] = { 0, 0, 0, 0 };
-  size_t extra = elements + (size_t)(MAX_QUADS - LAYER_COLOURS - MASK_QUADS) * ELEMENT_SIZE;
+  layer_pass_t pass = { cmd, elements, materials, view_at, vy, false };
   if (layered) {
-    g.cmd_barrier(cmd, BARRIER_ORDER_PRIMITIVES | BARRIER_ORDER_FRAGMENTS | BARRIER_INVALIDATE_ZCULL);
-    g.cmd_targets(cmd, 1, &layer_target, 0, frame_depth, 0);
-    g.cmd_viewport(cmd, 0, 0, layer_w, layer_h);
-    g.cmd_scissor(cmd, 0, 0, layer_w, layer_h);
-    gd.cmd_depth_range(cmd, 0, 1);
-    gd.cmd_clear_colour(cmd, 0, clear, CLEAR_ALL_CHANNELS);
-    if (frame_depth_clear) /* new: the far plane, before the game's depth is first copied in */
-      gd.cmd_clear_depth(cmd, 1, true, 0, 0);
-    bind_frame(cmd, view_at);
-    draw_state_t st = { -1, -1, 0 };
-    float rx = frame_only.x0 * sw, ry = frame_only.y0 * sh, rw = (frame_only.x1 - frame_only.x0) * sw,
-          rh = (frame_only.y1 - frame_only.y0) * sh;
-    quad_t in_front = { .c = { { 1, 1, 1, 1 }, { 1, 1, 1, 1 }, { 1, 1, 1, 1 }, { 1, 1, 1, 1 } }, .w = rw, .h = rh,
-                        .scale = 1, .alpha = 1 };
-    set_translate(&in_front, rx, ry);
-    quad_t behind = in_front, ground;
-    for (int i = 0; i < 4; i++)
-      behind.c[i] = (gpu_colour_t){ 0, 0, 0, 1 };
-    ground = behind;
-    plane_z(&in_front, frame_only.front); /* white where the depth is at his front or beyond */
-    plane_z(&behind, frame_only.back);    /* black again where it's past his back */
-    plane_z(&ground, frame_only.ground);  /* and where it's at the ground or under it */
-    g.cmd_depth(cmd, &depth_tested);
-    draw_quad(cmd, &in_front, extra, materials, &st);
-    g.cmd_depth(cmd, &depth_beyond);
-    draw_quad(cmd, &behind, extra + ELEMENT_SIZE, materials, &st);
-    g.cmd_depth(cmd, &depth_tested);
-    draw_quad(cmd, &ground, extra + 3 * ELEMENT_SIZE, materials, &st);
-    g.cmd_barrier(cmd, BARRIER_ORDER_PRIMITIVES | BARRIER_ORDER_FRAGMENTS | BARRIER_INVALIDATE_TEXTURE);
-    g.cmd_targets(cmd, 0, 0, 0, frame_depth, 0); /* the depth alone: the layer is read */
-    g.cmd_viewport(cmd, 0, 0, layer_w, layer_h);
-    g.cmd_scissor(cmd, 0, 0, layer_w, layer_h);
-    quad_t far = { .c = { { 1, 1, 1, 1 }, { 1, 1, 1, 1 }, { 1, 1, 1, 1 }, { 1, 1, 1, 1 } }, .w = sw, .h = sh,
-                   .textured = true, .image = IMAGE_LAYER, .material = MATERIAL_MASK, .scale = 1, .alpha = 1 };
-    set_translate(&far, 0, 0);
-    float t0 = frame_lower_left ? 1 : 0, t1 = 1 - t0;
-    float layer_st[8] = { 0, t0, 1, t0, 0, t1, 1, t1 };
-    __builtin_memcpy(far.st, layer_st, sizeof(layer_st));
-    far.m[11] = clip_z(1);
-    g.cmd_depth(cmd, &depth_far);
-    draw_quad(cmd, &far, extra + 2 * ELEMENT_SIZE, materials, &st);
-    g.cmd_depth(cmd, &depth);
-    g.cmd_barrier(cmd, BARRIER_ORDER_PRIMITIVES | BARRIER_ORDER_FRAGMENTS | BARRIER_INVALIDATE_ZCULL);
-  }
-  for (int k = 0; layered && k < n_layer_colours; k++) {
-    if (k) /* the layer's last colour has been laid over the picture */
-      g.cmd_barrier(cmd, BARRIER_ORDER_PRIMITIVES | BARRIER_ORDER_FRAGMENTS);
-    g.cmd_targets(cmd, 1, &layer_target, 0, frame_depth, 0);
-    g.cmd_viewport(cmd, 0, 0, layer_w, layer_h);
-    g.cmd_scissor(cmd, 0, 0, layer_w, layer_h);
-    gd.cmd_clear_colour(cmd, 0, clear, CLEAR_ALL_CHANNELS);
-    bind_frame(cmd, view_at);
-    g.cmd_depth(cmd, &depth_tested);
-    draw_state_t st = { -1, -1, 0 };
-    for (int i = 0; i < n_quads; i++)
-      if (quads[i].depth_tested && quads[i].layer == k &&
-          !draw_quad(cmd, &quads[i], elements + (size_t)i * ELEMENT_SIZE, materials, &st))
-        break;
-    g.cmd_depth(cmd, &depth);
-    g.cmd_barrier(cmd, BARRIER_ORDER_PRIMITIVES | BARRIER_ORDER_FRAGMENTS | BARRIER_INVALIDATE_TEXTURE);
-    /* over the picture, in its colour, the whole area */
-    g.cmd_targets(cmd, 1, &frame_target, 0, 0, 0);
-    g.cmd_viewport(cmd, frame_area.x, vy, frame_area.w, frame_area.h);
-    g.cmd_scissor(cmd, frame_area.x, vy, frame_area.w, frame_area.h);
-    gpu_colour_t c = layer_colours[k];
-    c.a = 1;
-    quad_t q = { .c = { c, c, c, c }, .w = sw, .h = sh, .textured = true, .image = IMAGE_LAYER, .scale = 1, .alpha = 1 };
-    set_translate(&q, 0, 0);
-    float t0 = frame_lower_left ? 1 : 0, t1 = 1 - t0;
-    float layer_st[8] = { 0, t0, 1, t0, 0, t1, 1, t1 };
-    __builtin_memcpy(q.st, layer_st, sizeof(layer_st));
-    st = (draw_state_t){ -1, -1, 0 };
-    draw_quad(cmd, &q, elements + (size_t)(MAX_QUADS - LAYER_COLOURS + k) * ELEMENT_SIZE, materials, &st);
+    draw_link_mask(&pass);
+    for (int k = 0; k < n_layer_colours; k++)
+      draw_layer_colour(&pass, k);
   }
 
   g.cmd_targets(cmd, 1, &frame_target, 0, 0, 0);
