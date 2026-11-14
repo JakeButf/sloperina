@@ -139,8 +139,8 @@ WC_CHILD, WC_ADULT, WC_DUNGEON, WC_BOSS, WC_OTHER = range(len(CATEGORIES))
 
 # air walls: airshape_t type, and airwall_t kind (what it does to Link: airwalls.json "link", tools/airwalls.py)
 SHAPE_BOX, SHAPE_CYLINDER = 0, 1
-WALL_BLOCKS, WALL_OTHER, WALL_PUSHES = 0, 1, 2
-WALL_KINDS = {"block": WALL_BLOCKS, "push": WALL_PUSHES, None: WALL_OTHER}
+WALL_BLOCKS, WALL_OTHER, WALL_PUSHES, WALL_VOIDS = 0, 1, 2, 3
+WALL_KINDS = {"block": WALL_BLOCKS, "push": WALL_PUSHES, None: WALL_OTHER, "void": WALL_VOIDS}
 
 NO_FIELD = "{ 0, FT_NONE }"
 FIELD_TYPES = {"Int": "FT_INT", "Bool": "FT_BOOL", "Enum": "FT_ENUM", "Float": "FT_FLOAT"}

@@ -105,6 +105,10 @@ to add it. Or open **debug > memory**, find the value, edit the row (**L**) and 
 **...see the invisible walls?**
 **scene > environment > show**. Cyan walls stop Link; red ones are walls he's inside.
 
+**...see where I'd void out?**
+**scene > void out > show** (1.1.1). Red columns void Link at once; off the ground map Link voids on leaving the
+orange fence; purple areas void whatever enters them.
+
 **...float around?**
 Turn on **settings > levitate > enabled**, close the menu, press **L3**. Push the left stick to move; hold **X** to rise or **B** to descend. Release both to hover.
 With **through walls** enabled, Link can pass through walls and ceilings;

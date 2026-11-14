@@ -22,6 +22,7 @@
 #include "scenedepth.h"
 #include "sys.h"
 #include "uishader.h"
+#include "view.h"
 
 float sqrtf(float x); /* from sdk */
 
@@ -44,6 +45,7 @@ bool overlayui_on_gpu(void)
 #define FADE_TO 0.45f
 /* gpuui's quads are shared with the panels drawn after (MAX_QUADS a frame): the outlines take at most
  * this many lines, the nearest walls' first (airwall.c sorts them), and the nearest of them a glow */
+#define FACE_ALPHA 0.16f  /* the void columns' and fence's sides */
 #define MAX_LINES_DRAWN 1400
 #define MAX_GLOWS 500
 
@@ -55,6 +57,10 @@ static const gpu_colour_t line_colours[AW_NCOLORS] = {
   [AW_SLOT_A] = { 1.0f, 0.42f, 0.86f, 1 }, /* pink: save slot A (savepos.c) */
   [AW_SLOT_B] = { 0.38f, 1.0f, 0.48f, 1 }, /* green: save slot B */
   [AW_LOAD] = { 1.0f, 0.95f, 0.32f, 1 },   /* yellow: where a load puts Link */
+  [AW_VOID_GROUND] = { 0.92f, 0.96f, 1.0f, 1 },  /* white: the edge of the mapped ground (voidmap.c) */
+  [AW_VOID_DEADLY] = { 1.0f, 0.16f, 0.14f, 1 },  /* red: a deadly cell, or the ring once Link is past it */
+  [AW_VOID_RING] = { 1.0f, 0.56f, 0.12f, 1 },    /* orange: the ring Link has to stay in off the map */
+  [AW_VOID_AREA] = { 0.72f, 0.36f, 1.0f, 1 },    /* purple: an area that voids Link inside it */
 };
 
 /* budget: the quads the lines may take. Short of them, the glows go first, then the farthest lines. */
@@ -64,6 +70,19 @@ static bool draw_lines(float w, float h, float px, int budget)
   const aw_line_t *lines = airwall_lines(&n);
   if (!lines || !n)
     return false;
+  /* the see-through faces first, under the lines: in the world, with the camera the game thread used */
+  int n_faces;
+  const view_cam_t *cam;
+  const aw_face_t *faces = airwall_faces(&n_faces, &cam);
+  n_faces = n_faces < budget ? n_faces : budget;
+  if (n_faces)
+    gpuui_world(cam);
+  for (int i = 0; i < n_faces; i++) {
+    gpu_colour_t c = line_colours[faces[i].color < AW_NCOLORS ? faces[i].color : 0];
+    c.a = FACE_ALPHA;
+    gpuui_face(faces[i].corner, faces[i].u, faces[i].v, c, faces[i].scene);
+  }
+  budget -= n_faces;
   int n_lines = n < MAX_LINES_DRAWN ? n : MAX_LINES_DRAWN;
   n_lines = n_lines < budget ? n_lines : budget;
   int n_glows = n < MAX_GLOWS ? n : MAX_GLOWS;
@@ -77,9 +96,11 @@ static bool draw_lines(float w, float h, float px, int budget)
       far = far < 0 ? 0 : far > 1 ? 1 : far;
       float a = 1 - (1 - FADE_TO) * far;
       c.a = pass ? a : a * GLOW_ALPHA;
-      if (airwalls_xray)
+      if (l->scene) /* hidden where anything of the scene is nearer */
+        gpuui_line_scene(l->x0 * w, l->y0 * h, l->d0, l->x1 * w, l->y1 * h, l->d1, (pass ? LINE_W : GLOW_W) * px, c);
+      else if (airwalls_xray)
         gpuui_line(l->x0 * w, l->y0 * h, l->x1 * w, l->y1 * h, (pass ? LINE_W : GLOW_W) * px, c);
-      else /* hidden where the scene is nearer (with nvn.c's depth for the frame) */
+      else /* hidden where Link is nearer (with nvn.c's depth for the frame) */
         gpuui_line_depth(l->x0 * w, l->y0 * h, l->d0, l->x1 * w, l->y1 * h, l->d1, (pass ? LINE_W : GLOW_W) * px, c);
     }
   }

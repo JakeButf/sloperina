@@ -22,6 +22,7 @@
 
 #include "sys.h"
 #include "uishader.h"
+#include "view.h"
 
 void *aligned_alloc(size_t align, size_t size); /* from main */
 void free(void *p);                             /* from main */
@@ -224,7 +225,7 @@ static int device_info(int item, int fallback, int most)
 }
 
 /* the data pool's layout */
-static size_t off_vertices, off_view, off_shadow, off_material, off_mask, off_materials, off_textures, off_samplers, off_elements,
+static size_t off_vertices, off_view, off_world, off_shadow, off_material, off_mask, off_materials, off_textures, off_samplers, off_elements,
   off_staging, off_atlas, data_size;
 
 static size_t round_up(size_t n, size_t to) { return (n + to - 1) / to * to; }
@@ -332,6 +333,7 @@ static bool make_data(void)
   size_t at = 0;
   off_vertices = at, at += UNIFORM_SIZE;
   off_view = at, at += UNIFORM_SIZE * SLOTS;
+  off_world = at, at += UNIFORM_SIZE * SLOTS;
   off_shadow = at, at += UNIFORM_SIZE;
   off_material = at, at += UNIFORM_SIZE;
   off_mask = at, at += UNIFORM_SIZE;
@@ -612,6 +614,7 @@ typedef struct {
   int8_t image;        /* textured: the atlas (-1) or a picture (gpuui_image) */
   uint8_t material;    /* 0 the plain material, else 1 + a frame's mapping */
   bool depth_tested;   /* hidden where the frame's depth is nearer (gpuui_line_depth) */
+  bool world;          /* its matrix puts it in the world: drawn with the camera's view (gpuui_face) */
   uint8_t layer;       /* depth_tested: its colour's layer */
   float scale, sx, sy; /* gpuui_scale's when it was made */
   float alpha;         /* gpuui_alpha's */
@@ -636,12 +639,15 @@ static bool frame_depth_clear;
  * 1, 1, 1, coverage). A colour's layer is the same as drawing its lines straight onto the picture: over the
  * background B, a glow g then a line l of colour c give c (l + g - g l) + B (1 - g) (1 - l). */
 #define IMAGE_LAYER (-2)
-#define LAYER_COLOURS 4 /* the colours a frame's depth tested quads may have (the air walls have 3) */
+#define LAYER_COLOURS 12 /* the colours a frame's depth tested quads may have (the air walls' and the voids') */
 #define MASK_QUADS 4    /* Link's mask: three, and the far depth round him */
 #define MATERIAL_MASK 0xFF
 static gpu_occluder_t frame_only; /* gpuui_depth's: Link's box */
+static float frame_world[16];     /* gpuui_world's: world points to clip space, column-major */
+#define FACE_NEARER 0.05f         /* units a face is tested nearer than it is, so what it lies on doesn't cut it */
 static nvn_obj_t layer_pool, layer, layer_view;
 static gpu_colour_t layer_colours[LAYER_COLOURS];
+static bool layer_scene[LAYER_COLOURS]; /* tested against the whole scene's depth, not Link's alone */
 static int n_layer_colours;
 static uint8_t *layer_mem;
 static int layer_w, layer_h;
@@ -684,6 +690,7 @@ static quad_t *new_quad(void)
   if (ready && n_quads < FRAME_QUADS - quad_reserve) {
     quads[n_quads].material = 0;
     quads[n_quads].depth_tested = false;
+    quads[n_quads].world = false;
     quads[n_quads].scale = quad_scale, quads[n_quads].sx = quad_sx, quads[n_quads].sy = quad_sy;
     quads[n_quads].alpha = quad_alpha;
     return &quads[n_quads++];
@@ -871,7 +878,28 @@ static void plane_z(quad_t *q, const float p[3])
   q->m[11] = k * (p[0] * q->m[3] / sw + p[1] * q->m[7] / sh + p[2]) + clip_z(0);
 }
 
-void gpuui_line_depth(float x0, float y0, float d0, float x1, float y1, float d1, float width, gpu_colour_t colour)
+/* quad q goes in its colour's layer (in white: the colour comes with the layer); false if the frame's layers
+ * are all other colours' */
+static bool into_layer(quad_t *q, gpu_colour_t colour, bool scene)
+{
+  int k = 0;
+  while (k < n_layer_colours && (layer_colours[k].r != colour.r || layer_colours[k].g != colour.g ||
+                                 layer_colours[k].b != colour.b || layer_scene[k] != scene))
+    k++;
+  if (k == LAYER_COLOURS)
+    return false;
+  if (k == n_layer_colours) {
+    layer_scene[k] = scene;
+    layer_colours[n_layer_colours++] = colour;
+  }
+  q->layer = (uint8_t)k;
+  for (int i = 0; i < 4; i++)
+    q->c[i] = (gpu_colour_t){ 1, 1, 1, colour.a };
+  return true;
+}
+
+static void line_tested(float x0, float y0, float d0, float x1, float y1, float d1, float width, gpu_colour_t colour,
+                        bool scene)
 {
   int before = n_quads;
   gpuui_line(x0, y0, x1, y1, width, colour);
@@ -881,21 +909,74 @@ void gpuui_line_depth(float x0, float y0, float d0, float x1, float y1, float d1
    * view passes it on with w 1. The depth along a line on the picture is linear in the picture, as the
    * scene's is (1 / distance is). */
   quad_t *q = &quads[n_quads - 1];
-  int k = 0; /* its colour's layer */
-  while (k < n_layer_colours && (layer_colours[k].r != colour.r || layer_colours[k].g != colour.g ||
-                                 layer_colours[k].b != colour.b))
-    k++;
-  if (k == LAYER_COLOURS)
+  if (!into_layer(q, colour, scene))
     return; /* one colour too many: drawn as gpuui_line */
-  if (k == n_layer_colours)
-    layer_colours[n_layer_colours++] = colour;
-  q->layer = (uint8_t)k;
-  for (int i = 0; i < 4; i++) /* white: its colour comes with the layer */
-    q->c[i] = (gpu_colour_t){ 1, 1, 1, colour.a };
   float z0 = clip_z(d0), z1 = clip_z(d1);
   q->m[8] = (z1 - z0) / q->w;
   q->m[11] = z0;
   q->depth_tested = true;
+}
+
+void gpuui_line_depth(float x0, float y0, float d0, float x1, float y1, float d1, float width, gpu_colour_t colour)
+{
+  line_tested(x0, y0, d0, x1, y1, d1, width, colour, false);
+}
+
+void gpuui_line_scene(float x0, float y0, float d0, float x1, float y1, float d1, float width, gpu_colour_t colour)
+{
+  line_tested(x0, y0, d0, x1, y1, d1, width, colour, true);
+}
+
+/* World points to clip space as the game's camera does it: x and y by the half fov's tangents, w the distance
+ * ahead, and z so that z / w is the game's depth for a point FACE_NEARER nearer. */
+void gpuui_world(const view_cam_t *cam)
+{
+  float span = cam->far / (cam->far - cam->near);
+  /* depth = span (1 - near / ahead); clip z = clip_z(depth) * ahead = z_ahead * ahead + z_const */
+  float z_ahead = clip_z(1) * span - clip_z(0) * (span - 1), z_const = -(clip_z(1) - clip_z(0)) * span * cam->near;
+  z_const -= z_ahead * FACE_NEARER;
+  const float *rows[3] = { cam->right, cam->up, cam->forward };
+  float scale[3] = { 1 / cam->tan_x, 1 / cam->tan_y, 1 };
+  float m[4][4] = { { 0 } }; /* m[row][column] */
+  for (int row = 0; row < 3; row++) {
+    int to = row == 2 ? 3 : row; /* the distance ahead is w */
+    for (int i = 0; i < 3; i++) {
+      m[to][i] = rows[row][i] * scale[row];
+      m[to][3] -= rows[row][i] * scale[row] * cam->pos[i];
+    }
+  }
+  for (int i = 0; i < 4; i++)
+    m[2][i] = z_ahead * m[3][i];
+  m[2][3] += z_const;
+  for (int column = 0; column < 4; column++)
+    for (int row = 0; row < 4; row++)
+      frame_world[column * 4 + row] = m[row][column];
+}
+
+void gpuui_face(const float corner[3], const float u[3], const float v[3], gpu_colour_t colour, bool scene)
+{
+  float w = sqrtf(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]), h = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+  if (!frame_depth || w < 1e-4f || h < 1e-4f)
+    return;
+  quad_t *q = new_quad();
+  if (!q)
+    return;
+  if (!into_layer(q, colour, scene)) {
+    n_quads--;
+    return;
+  }
+  /* the corner (x, y) of the w x h quad to corner + x u / w + y v / h */
+  for (int i = 0; i < 3; i++) {
+    q->m[i * 4] = u[i] / w;
+    q->m[i * 4 + 1] = v[i] / h;
+    q->m[i * 4 + 2] = 0;
+    q->m[i * 4 + 3] = corner[i];
+  }
+  q->w = w;
+  q->h = h;
+  q->textured = false;
+  q->depth_tested = true;
+  q->world = true;
 }
 
 void gpuui_rect_turned(float cx, float cy, float w, float h, float angle, gpu_colour_t colour)
@@ -1321,7 +1402,7 @@ static bool draw_quad(nvn_obj_t *cmd, const quad_t *q, size_t at, size_t materia
 /* what the layer's passes share (gpuui_end's) */
 typedef struct {
   nvn_obj_t *cmd;
-  size_t elements, materials, view_at;
+  size_t elements, materials, view_at, world_at;
   int vy;               /* the visible area's y in the target */
   bool after_composite; /* the picture was the target last: a barrier before the layer is again */
 } layer_pass_t;
@@ -1395,14 +1476,18 @@ static void draw_layer_colour(layer_pass_t *pass, int k)
   g.cmd_targets(cmd, 1, &layer_target, 0, frame_depth, 0);
   g.cmd_viewport(cmd, 0, 0, layer_w, layer_h);
   g.cmd_scissor(cmd, 0, 0, layer_w, layer_h);
+  gd.cmd_depth_range(cmd, 0, 1);
   gd.cmd_clear_colour(cmd, 0, clear, CLEAR_ALL_CHANNELS);
   bind_frame(cmd, pass->view_at);
   g.cmd_depth(cmd, &depth_tested);
   draw_state_t st = { -1, -1, 0 };
-  for (int i = 0; i < n_quads; i++)
-    if (quads[i].depth_tested && quads[i].layer == k &&
-        !draw_quad(cmd, &quads[i], pass->elements + (size_t)i * ELEMENT_SIZE, pass->materials, &st))
-      break;
+  for (int world = 1; world >= 0; world--) { /* the faces in the world first, with the camera's view */
+    g.cmd_uniform(cmd, STAGE_VERTEX, 1, data_gpu + (world ? pass->world_at : pass->view_at), UNIFORM_SIZE);
+    for (int i = 0; i < n_quads; i++)
+      if (quads[i].depth_tested && quads[i].layer == k && quads[i].world == (world != 0) &&
+          !draw_quad(cmd, &quads[i], pass->elements + (size_t)i * ELEMENT_SIZE, pass->materials, &st))
+        break;
+  }
   g.cmd_depth(cmd, &depth);
   g.cmd_barrier(cmd, BARRIER_ORDER_PRIMITIVES | BARRIER_ORDER_FRAGMENTS | BARRIER_INVALIDATE_TEXTURE);
   /* over the picture, in its colour, the whole area */
@@ -1460,13 +1545,24 @@ bool gpuui_end(nvn_obj_t *cmd, const void *game_texture_pool, const void *game_s
   bool layered = frame_depth && (n_layer_colours || frame_depth_clear);
   int vy = frame_lower_left ? frame_texture_height - frame_area.y - frame_area.h : frame_area.y;
   g.cmd_render_enable(cmd, true);
-  /* the lines' layer a colour at a time: cleared, its depth tested quads drawn into it against that depth, then
-   * over the picture */
-  layer_pass_t pass = { cmd, elements, materials, view_at, vy, false };
+  /* The lines' layer a colour at a time. First the ones the scenery hides, against the scene's depth as the game
+   * left it; then that depth is made Link's alone, and the ones only Link hides go against it. On a new depth's
+   * first frame the game's isn't copied in yet: the scenery's go with the rest then, against the cleared depth. */
+  size_t world_at = off_world + (size_t)frame_slot * UNIFORM_SIZE;
+  __builtin_memcpy(data_mem + world_at, frame_world, sizeof(frame_world));
+  layer_pass_t pass = { cmd, elements, materials, view_at, world_at, vy, false };
+  bool scene_first = layered && !frame_depth_clear;
+  if (scene_first) {
+    g.cmd_barrier(cmd, BARRIER_ORDER_PRIMITIVES | BARRIER_ORDER_FRAGMENTS | BARRIER_INVALIDATE_ZCULL);
+    for (int k = 0; k < n_layer_colours; k++)
+      if (layer_scene[k])
+        draw_layer_colour(&pass, k);
+  }
   if (layered) {
     draw_link_mask(&pass);
     for (int k = 0; k < n_layer_colours; k++)
-      draw_layer_colour(&pass, k);
+      if (!layer_scene[k] || !scene_first)
+        draw_layer_colour(&pass, k);
   }
 
   g.cmd_targets(cmd, 1, &frame_target, 0, 0, 0);
@@ -1475,7 +1571,7 @@ bool gpuui_end(nvn_obj_t *cmd, const void *game_texture_pool, const void *game_s
   bind_frame(cmd, view_at);
   draw_state_t st = { -1, -1, 0 };
   for (int i = 0; i < n_quads; i++) /* the rest (the depth tested ones went in the layer) */
-    if (!(quads[i].depth_tested && layered) &&
+    if (!(quads[i].depth_tested && layered) && !quads[i].world &&
         !draw_quad(cmd, &quads[i], elements + (size_t)i * ELEMENT_SIZE, materials, &st))
       break;
   /* the game's descriptor pools back, for its next frame's commands */

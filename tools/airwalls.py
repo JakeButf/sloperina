@@ -16,6 +16,13 @@ presets' SubLayerHitMaskEntity) has Unspecified, his body's sub-layer. Then "pus
 Unridable (he can't stand on it, so he's pushed off it: the ledge in front of the Forest Temple), else "block"
 (an invisible wall: round the rocks in the Lost Woods). None: it doesn't stop him (walls for enemies, NPCs,
 animals, Epona, the camera, or Link only while he climbs).
+
+Also the areas that void Link: a layout's AiGroups whose logic is a Gimmick_AreaContact_FallDown module (the
+ones with the node HoldSensorHitInfoGiveAbyssActor; the _Item one is for dropped items) name the placed "Area"
+actors they act for. An Area has no shape of its own in its pack: the game makes it from the placement
+(main+0x334FD40 on 1.1.1). Its origin is the middle of its bottom: a box of half extents Scale centred Scale.y
+up its own Y axis, or with Dynamic.RigidBodyShapeType 3 a cylinder of radius Scale.x and height 2 Scale.y.
+They are stored as walls with "link": "void", their shapes for a scale of 1.
 """
 import json
 import os
@@ -32,6 +39,15 @@ NOT_SHAPES = ("Box", "Cylinder", "AutoCalc", "$parent")  # keys of a shape param
 PHIVE_CONFIG = ("romfs/Pack/Bootup.Nin_Ounce_NVN2.pack.zs", "Phive/Config/PhiveConfig.byml")
 LINK_LAYER, LINK_SUB_LAYER = "Player", "Unspecified"  # Link's body on foot (Player_Base: CharacterMatterRigidBody)
 UNRIDABLE_TAG = "Unridable"
+# the logic modules that void whoever is in their area (AiGroups "Logic": Logic/Module/<name>/<file>)
+VOID_LOGICS = ("Gimmick_AreaContact_FallDown", "Gimmick_AreaContact_FallDownMountian",
+               "Gimmick_AreaContact_FallDown_GanonCastle")
+AREA_ACTOR = "Area"
+AREA_BOX, AREA_CYLINDER = 1, 3  # Dynamic.RigidBodyShapeType (1 when it isn't given)
+AREA_SHAPES = {
+    AREA_BOX: {"type": "box", "center": [0.0, 1.0, 0.0], "half": [1.0, 1.0, 1.0]},
+    AREA_CYLINDER: {"type": "cylinder", "a": [0.0, 0.0, 0.0], "b": [0.0, 2.0, 0.0], "radius": 1.0},
+}
 
 
 def member(path):
@@ -160,6 +176,31 @@ def _scale_of(placed):
     return [float(placed.get("Scale", 1.0))] * 3
 
 
+def void_areas(root, part):
+    """The layout's areas that void Link, as airwalls.json walls."""
+    placed_by_hash = {placed.get("Hash"): placed for placed in root.get("Actors") or []}
+    walls = []
+    for group in root.get("AiGroups") or []:
+        logic = group.get("Logic", "").split("/")
+        if len(logic) < 3 or logic[2] not in VOID_LOGICS:
+            continue
+        for reference in group.get("References") or []:
+            placed = placed_by_hash.get(reference.get("Reference"))
+            if not placed or placed.get("Gyaml") != AREA_ACTOR:
+                continue
+            shape = AREA_SHAPES.get((placed.get("Dynamic") or {}).get("RigidBodyShapeType", AREA_BOX))
+            if not shape:
+                continue
+            walls.append({
+                "actor": AREA_ACTOR, "part": part, "mask": None, "link": "void", "hash": placed.get("Hash"),
+                "t": [float(v) for v in placed.get("Translate", [0, 0, 0])],
+                "r": [float(v) for v in placed.get("Rotate") or [0, 0, 0]],
+                "s": _scale_of(placed),
+                "shapes": [shape],
+            })
+    return walls
+
+
 def main():
     nup = gamefiles.nup()
     layouts = sorted(path for path in nup.index if path.startswith("romfs/Banc/") and path.endswith(LAYOUT_SUFFIX))
@@ -174,6 +215,9 @@ def main():
         except Exception as e:  # a file this reader can't handle: report and go on
             print(f"skip {path}: {e}")
             continue
+        areas = void_areas(root, part)
+        if areas:
+            maps.setdefault(map_name, []).extend(areas)
         for placed in root.get("Actors") or []:
             actor = placed.get("Gyaml", "")
             if "AirWall" not in actor:

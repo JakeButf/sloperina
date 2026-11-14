@@ -30,6 +30,7 @@
 #include "divetest.h"
 #include "levitate.h"
 #include "settings.h"
+#include "voidmap.h"
 #include "warp.h"
 #include "watches.h"
 #include "nvn.h"
@@ -368,6 +369,7 @@ static void frame(void)
     menu_draw();
   }
   bool overlays_on_gpu = overlayui_on_gpu(); /* lines and bars for the GPU, else rectangles */
+  voidmap_frame();
   airwall_frame(overlays_on_gpu);
   enemyhp_frame(overlays_on_gpu);
   menus_research_frame();

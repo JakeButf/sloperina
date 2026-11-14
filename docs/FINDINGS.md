@@ -1034,3 +1034,73 @@ point.
   most every few frames while it moves) and refreshed now and then while Link stands on it.
 - In Ghidra `thunk_FUN_03c41c50` is marked no-return, so decompiles stop after it (FUN_00945220, FUN_00375BA0):
   read the disassembly (`tools/re64.py dump/v131072 func <offset>`).
+
+### 9.8 Where Link voids out: the ground map, its two probes and the void areas (v131072; from the disassembly, the view checked in game 14th November 2026)
+Link can void on ground that looks solid and walk on thin air without voiding, because the void check doesn't use
+the collision. It uses a voxel map of the walkable ground. Checked in game: the deadly cells, the 8 unit rule and
+the flags they set (the view and its log agree with where Link voids). From the disassembly and the files only:
+the probes' workings, what switches the flags off, and the void areas' shapes.
+- **The ground map** (VolumeStats, `Phive/VolumeStats/<Area>/*.bpvsts.zs`): its manager is
+  `[[[[main+0x4C7DF00]]+0xC0]+0x170]`. `+0x10` heads a linked list of the loaded areas (`+0x18` the first node,
+  `+0x24` an i32: where the node is in an area; a node's `+0x08` the next). An area's holder `[area+0x90]` has
+  `+0x28` a count and `+0x30` pointers to its chunks. A map has many loaded at once (96 to 144 seen), most of them
+  far from Link.
+- **A chunk** is 256^3 one-unit cells as a sparse octree of 8 levels: its origin (3 x i32, cells) at `+0x00`,
+  the levels' node arrays at `+0x168 + level * 8`. A node is a u32: bits 0-7 which of its 8 children exist (bit
+  `x | y << 1 | z << 2`), bits 8-31 the index of its first child in the next level's array; the children there are
+  come one after another, so child c's index is that plus the count of set bits below c. Chunks overlap: one only
+  answers for its cells 3..253. A cell that's set is walkable space just over the ground.
+- **The cells' records:** each level has a bit stream at `chunk+0x28 + level * 0x28`: `+0x10` the data, `+0x18` the
+  bits a record, `+0x1C` its format; record n of level L belongs to node n of level L + 1 (level 7's to the cells).
+  The 7 formats are a table at `main+0x3EE8840`, 0x74 bytes each: `+0x04 + f` a byte, 1 if the format has field f,
+  `+0x1C + f * 4` the field's first bit (a format past the table reads as format 0). A field is read from the
+  deepest level whose format has it, bits lowest first. Only format 6 has fields 20 (1 bit) and 21 (4 bits, times
+  2/3); in the files the overworld's chunks use it and the dungeons' don't, so a dungeon's cells should never be deadly
+  (not checked in game).
+- **The probes** are in Link's probe object `[[actor+0x270]+0x460]`, run once a frame (`main+0x388340`):
+  - probe A casts straight down from a little over Link (5000 units long, so from any height), from Link's middle and
+    in turn from 8 points 0.6 units round it: hit `+0x37C` bit 0, where it landed `+0x360`;
+  - probe C looks for the nearest set cell with 64 rays all round (only 7 of them a frame once it has one) and
+    keeps the best it has found until a nearer one turns up: hit `+0xBBC` bit 0, the cell `+0xBA0`, its distance
+    `+0x1158`, and that distance level (x and z only) `+0x115C`. The old point is never checked again, so off the
+    map it's as good as frozen;
+  - `+0xA8` bit 18: Link is more than 5 units outside the probe's own box.
+- **The flags:** `main+0x5F90A0` rebuilds Link's ground flags P`+0x13D0` every frame (P = `[[actor+0x270]+0x358]`):
+  - bit 24 (0x1000000): probe A missed, or its hit is 5 units or more under Link. Never voids by itself (it only stops
+    the restart point following Link, §9.7);
+  - bit 25 (0x2000000): probe A missed **and** probe C's cell is 8.0 units or more away level. Voids;
+  - bit 19 (0x80000): the cell probe A landed on has field 20 set and field 21 over 3.0, or probe `+0xA8` bit 18.
+    Voids.
+
+  None of them is set while the probe hasn't run since its reset (`+0xA8` bit 1 clear), while
+  `[[main+0x4C7E090]+0x68]` ≠ 0 (an event running: talking, a chest, a cutscene, a loading zone) or while P`+0x1C54`
+  bit 0 (the frame after an event). `main+0x82C510` turns them into the void (its type at P`+0x191C`); it only runs
+  with Link's own update, so nothing voids while the game is paused (the ocarina, the menus).
+- **The void areas** are placed `Area` actors that a layout's `AiGroups` tie to a logic module
+  `Gimmick_AreaContact_FallDown`, `..._FallDownMountian` or `..._FallDown_GanonCastle` (their node
+  `HoldSensorHitInfoGiveAbyssActor`, `main+0x31E4614`, sends a death request, reason FallIntoAbyss, to what its
+  sensor holds; `..._FallDown_Item` is for dropped items and isn't one). 131 in 39 maps. 73 of them are thin
+  discs (a cylinder of scale 1, 0.1, 1) at the holes down into grottos, which start with the same fall; 58 are
+  boxes, the real void volumes (Ganon's Castle has one 800 units across under everything). An Area has no shape in
+  its pack: `main+0x334FD40` makes it from the placement, reading the blackboard's `RigidBodyShapeType` (1 when
+  it isn't given: a box; 3: a cylinder; 0: a sphere). Its origin is the middle of its bottom: the shape's centre is
+  Scale.y up the actor's own Y axis, a box's half extents are Scale, a cylinder's radius Scale.x and height
+  2 Scale.y. Not checked in game: the exact placement of each shape, and whether every one is on all the time.
+- **Not from either:** floors whose material is tagged Abyss void on touch (P`+0x13E8` bit 4, read from the
+  ground under Link within about 2 units), and crushers and the like send the same death request. The tag
+  (user shape tag 4; presets `Floor_Abyss`, `Material_Sand_Abyss`, `Material_Metal_Spike_Abyss`) is on 84
+  triangles of the whole game's static collision and on no actor's mesh but one room's: a flat floor at
+  y -39.4 under the Shadow Temple's chasm (10 triangles), and two spike blocks there, which hurt instead
+  (a Spike sub-material cancels the tag). So it isn't drawn.
+- **The view** (voidmap.c, airwall.c): the cells round Link (48 x 64 x 48, 48 of the 64 under Link) are read out
+  of the chunks that reach that box every 120 frames or when Link has moved 4 cells; the outlines are made Link's
+  layer first, then outward, so that what's left out when there are too many is far away. About 3 ms a read on
+  Lichii in the busiest place found (Kokiri Forest's hillsides, more deadly cells than fit).
+  - **A first version missed cells next to Link** twice: it filled its lines from the box's bottom layer up, so
+    the room ran out before Link's layer in a place with many deadly cells; and it stopped at the list's first 64
+    chunks, with the ones round Link later in it. A log line saying what the view held where Link voided told
+    the two apart.
+  - **Faces in the world on the game's UI shader:** its `view` uniform is a full 4x4, so a second one with a
+    perspective matrix (x and y by the half fov's tangents, w the distance ahead, z scaled so z / w is the game's
+    depth) draws a quad whose element matrix puts it in the world (`gpuui_world`, `gpuui_face`), and the scene's
+    depth hides it. Worked as written.

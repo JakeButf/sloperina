@@ -26,6 +26,7 @@
 #include "levitate.h"
 #include "airwall.h"
 #include "savepos.h"
+#include "voidmap.h"
 
 #include "sdfs.h"
 #include "lang.h"
@@ -101,6 +102,12 @@ typedef struct {
   int32_t airwalls_xray;
   int32_t savepos_shown;
   int32_t savepos_load;
+  int32_t voidmap_shown;
+  int32_t voidmap_ground;
+  int32_t voidmap_deadly;
+  int32_t voidmap_ring;
+  int32_t voidmap_xray;
+  int32_t voidmap_areas;
   int32_t enemy_hp;
   int32_t enemy_hp_xray;
   int32_t menu_style;
@@ -170,6 +177,12 @@ static snapshot_t take_snapshot(void)
   s.airwalls_xray = airwalls_xray;
   s.savepos_shown = savepos_shown;
   s.savepos_load = savepos_load;
+  s.voidmap_shown = voidmap_shown;
+  s.voidmap_ground = voidmap_ground;
+  s.voidmap_deadly = voidmap_deadly;
+  s.voidmap_ring = voidmap_ring;
+  s.voidmap_xray = voidmap_xray;
+  s.voidmap_areas = voidmap_areas;
   s.enemy_hp = enemy_hp_shown;
   s.enemy_hp_xray = enemy_hp_xray;
   s.menu_style = gfx_style;
@@ -252,6 +265,12 @@ static void apply_snapshot(const snapshot_t *s)
   airwalls_xray = s->airwalls_xray != 0;
   savepos_shown = s->savepos_shown != 0;
   savepos_load = s->savepos_load != 0;
+  voidmap_shown = s->voidmap_shown != 0;
+  voidmap_ground = s->voidmap_ground != 0;
+  voidmap_deadly = s->voidmap_deadly != 0;
+  voidmap_ring = s->voidmap_ring != 0;
+  voidmap_xray = s->voidmap_xray != 0;
+  voidmap_areas = s->voidmap_areas != 0;
   enemy_hp_shown = s->enemy_hp != 0;
   enemy_hp_xray = s->enemy_hp_xray != 0;
 }
@@ -335,6 +354,12 @@ static const struct { const char *key; size_t field_offset; } int_keys[] = {
   INT_KEY("airwalls_xray", airwalls_xray),
   INT_KEY("savepos_shown", savepos_shown),
   INT_KEY("savepos_load", savepos_load),
+  INT_KEY("voids_shown", voidmap_shown),
+  INT_KEY("voids_ground", voidmap_ground),
+  INT_KEY("voids_deadly", voidmap_deadly),
+  INT_KEY("voids_ring", voidmap_ring),
+  INT_KEY("voids_xray", voidmap_xray),
+  INT_KEY("voids_areas", voidmap_areas),
   INT_KEY("enemy_health", enemy_hp),
   INT_KEY("enemy_health_xray", enemy_hp_xray),
   INT_KEY("menu_style", menu_style),
@@ -542,6 +567,12 @@ static void save_settings_file(const snapshot_t *s)
                   (int)s->menu_scale, (int)s->input_display, (int)s->input_display_bg, (int)s->input_parts,
                   (int)s->input_style, (int)s->input_size, (int)s->input_position, (int)s->input_x,
                   (int)s->input_y, (int)s->menu_style, (int)s->hide_in_game_menus);
+  if (n < (int)sizeof(buf))
+    n += snprintf(buf + n, sizeof(buf) - n,
+                  "voids_shown=%d\nvoids_ground=%d\nvoids_deadly=%d\nvoids_ring=%d\n"
+                  "voids_xray=%d\nvoids_areas=%d\n",
+                  (int)s->voidmap_shown, (int)s->voidmap_ground, (int)s->voidmap_deadly, (int)s->voidmap_ring,
+                  (int)s->voidmap_xray, (int)s->voidmap_areas);
   for (int w = 0; w < W_COUNT && n < (int)sizeof(buf); w++)
     if (s->watch_labels[w][0])
       n += snprintf(buf + n, sizeof(buf) - n, WATCH_LABEL_KEY "%d=%s\n", w, s->watch_labels[w]);
