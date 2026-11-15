@@ -430,16 +430,17 @@ game's pause screen closed):
 - **Tap the button** (L or R): the game pauses (one more frame plays first, so the pause icon is on screen and
   you can see it hasn't crashed). Tap again: one frame. **Hold** it: after a moment, frames play
   one after another (about 15 a second) until you let go.
-- **Button + L3**: the game runs again. It always works, even with the menu open (the menu closes): nothing is
-  drawn while paused, so a menu opened then can't be seen. Press L3 first, then the button, so the menu doesn't
-  take the button press.
+- **Button + L3**: the game runs again. It always works, even with the menu open (the menu stays open). Press L3
+  first, then the button, so the menu doesn't take the button press.
 - A tap counts when you let go. You can hold or press anything else meanwhile (move the stick, hold A or Z...),
   as in gz: the frame you let through gets it. Only with **R** as the button, R + D-pad and R + right stick down
   stay shortcuts and don't advance.
 - **Buffered input**: everything you press while paused, and the last direction you push each stick, is given to
   the next frame, even if you've let go by then.
-- While paused the picture doesn't change (the game draws nothing), so the watches and input display update with
-  each frame you let through. The menu can still be opened and used while paused; its button works the menu then.
+- While paused the game draws nothing, so sloperinaGZ shows its last frame itself, about 60 times a second: the
+  menu, the watches, the input display and the log stay live over it. The menu can be opened and used while
+  paused; its button works the menu then. (If the game's picture is larger than 2560x1440, the last frame stays
+  on screen as it was and a menu opened while paused can't be seen; button + L3 then closes it.)
 
 ## 5 Settings file
 
@@ -464,6 +465,5 @@ dropped (é shows as e) and other alphabets can't be shown yet.
 - Game versions **1.0.0** (base) and **1.1.1** (update v131072) are supported.
 - Collision shows the air walls; the full collision mesh isn't drawn yet.
 - Memory watches aren't kept between runs.
-- Frame advance freezes the picture while paused ([4](#4-about-frame-advance)).
 - Some changes only show after the game redraws them (pause screen, loading zone); story stages need a loading
   zone.
