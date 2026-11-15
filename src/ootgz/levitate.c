@@ -886,10 +886,55 @@ static void protect_landing(bool menu_open)
   }
 }
 
+/* Loading zones: taking an exit writes the destination to Sequence_ReservedNextBanc (GD_STR_NEXT_MAP, FINDINGS
+ * §5.18), which the game clears again later. From then until the map changes or the game clears it (or
+ * MAP_CHANGE_FRAMES) levitate is off and L3 doesn't start it, so Link goes through as he would on foot. */
+#define MAP_CHANGE_FRAMES 600 /* ~10 s: a reservation that never leads to a new map (or the same map) */
+
+static char seen_next[GD_STR_LEN], seen_map[GD_STR_LEN];
+static uint32_t map_change_frame; /* when the last exit was taken; 0: none pending */
+
+static bool copy_if_changed(char *seen, const char *now)
+{
+  int i = 0;
+  while (i < GD_STR_LEN - 1 && now[i] && now[i] == seen[i])
+    i++;
+  if (seen[i] == (i < GD_STR_LEN - 1 ? now[i] : 0))
+    return false;
+  for (i = 0; i < GD_STR_LEN - 1 && now[i]; i++)
+    seen[i] = now[i];
+  seen[i] = 0;
+  return true;
+}
+
+/* true while Link is going through a loading zone */
+static bool changing_map(void)
+{
+  const char *next = gd_get_str(GD_STR_NEXT_MAP);
+  const char *map = gd_get_str(GD_STR_MAP);
+  if (next && copy_if_changed(seen_next, next)) {
+    if (seen_next[0]) {
+      map_change_frame = frame_counter() | 1;
+      log_printf("levitate: exit taken to %s; off until the map loads", seen_next);
+    } else {
+      map_change_frame = 0; /* the game is done with it (the same map: the Lost Woods' loops) */
+    }
+  }
+  if (map && copy_if_changed(seen_map, map))
+    map_change_frame = 0;
+  if (map_change_frame && frame_counter() - map_change_frame > MAP_CHANGE_FRAMES)
+    map_change_frame = 0;
+  return map_change_frame != 0;
+}
+
 /* L3: start / stop */
 static void handle_l3(bool menu_open)
 {
-  if (!levitate_enabled) {
+  if (changing_map()) {
+    if (floating)
+      gfx_notice("levitate off: loading zone");
+    drop();
+  } else if (!levitate_enabled) {
     drop();
   } else if (!menu_open && (input_pressed() & BTN_LSTICK)) {
     if (floating) {
