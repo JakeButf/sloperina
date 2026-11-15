@@ -126,6 +126,13 @@ static const struct z64hd_build z64hd_builds[] = {
     .scene_mgr_ptr = 0x4E97648,
     .autosave_update = 0x32762B0,
     .safety_search = 0x945310,
+    .ragdoll_controller = 0x5F88C0,
+    .ragdoll_start = 0x3218D30,
+    .ragdoll_end = 0x3219090,
+    .player_stop_linear = 0x972A40,
+    .player_stop_angular = 0x92FDE0,
+    .player_play_as = 0x933270,
+    .as_slipping_down = 0x4997FE8,
     .link_paths = {
       { 0x4E371D0, 0x480 }, { 0x4E94858, 0x2E0 }, { 0x4E935B8, 0xEF8 },
       { 0x4E94860, 0x328 }, { 0x4E94368, 0xD70 },

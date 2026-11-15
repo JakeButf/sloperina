@@ -1070,3 +1070,32 @@ point.
   most every few frames while it moves) and refreshed now and then while Link stands on it.
 - In Ghidra `thunk_FUN_03c41c50` is marked no-return, so decompiles stop after it (FUN_00945220, FUN_00375BA0):
   read the disassembly (`tools/re64.py dump/v131072 func <offset>`).
+
+### 9.9 Ragdolling Link on demand (v131072; from the disassembly, not yet checked in game)
+The game ragdolls Link in events with the AI node `ExecuteEventPlayerImmediateRagdollDown` (vtable: name getter
+`main+0x49980A0`, enter `+0x50` = `main+0x26B3EC0`, update `+0x58` = `main+0x26B3FB0`, leave `+0x60` =
+`main+0x26B42C0`). The same calls are in `ExecutePlayerSlippingDown` (enter `main+0x280C7A0`, leave
+`main+0x280CE80`), the player's own slip-and-fall. **The menu's link > ragdoll (`ragdoll.c`) makes the enter's and
+the leave's calls.**
+- **Finding a node's code:** a node's name getter (`adrp x0; add x0; ret` to its name) sits in its vtable; enter,
+  update and leave follow it at `+0x50`, `+0x58` and `+0x60` (checked on `ExecutePlayerUseWarpItem`, §9.7). The
+  dump keeps vtable entries as plain `main+` offsets, so search the data for the getter's offset.
+- **Objects:** P = the player component `[[actor+0x270]+0x358]` (`main+0x944E50`). C = Link's ragdoll controller,
+  `main+0x5F88C0(H)` with H = `[[[actor+0x270]+0x50]+0x20]+0x10` (the object before the controller property in
+  `cct.c`'s chain; also `main+0x837620(actor)`). `main+0x5F88C0` walks H's list (count `+0x50`, entries `+0x58`)
+  by type and returns NULL when none matches.
+- **The enter:** `main+0x9339F0(P, 0.0)` (not followed); `main+0x972A40(P, &zero, 0)` and `main+0x92FDE0(P,
+  &zero, 0)` set the body's linear and angular velocity (scaled by 60 when the bool is set); P`+0x1030` = 0;
+  `main+0x933270(P, 0, main+0x4997FE8, 0xF, 0)` plays the AS whose names are at `main+0x4997FE8` (`SlippingDown`,
+  `SlippingDownLand`) in P's slot 0 (slots of 0xD8 at P`+0x230`); then **start**: `main+0x3218D30(C, &req)`.
+  `req` (0x30 bytes): `+0` actor, `+8` f32 1.0, `+0x1C` 1, `+0x20` 2, `+0x24` preset (0 here; 1 from the slipping
+  node; indexes the name offsets at `main+0x3F0A39C`: `Default`, `BongoBongoClapEnd`), `+0x28` 0 (`Default`), the
+  rest 0. It sets C`+0x17C` = 3 and asks for the reaction `ImmediateDown`.
+- **The update** only drives C while Link is in the air (P`+0x13D0` bit 0 clear): `main+0x321C040(C, &drive)`
+  then `main+0x38911A0(C)`. On the ground it does nothing to the ragdoll. `ragdoll.c` doesn't drive it, and of the
+  enter it leaves out `main+0x9339F0` and the P`+0x1030` write (not understood).
+- **The leave (end):** `main+0x3219090(C, &{actor, u8 0})` (returns at once while C`+0x17C` = 0), then P`+0x1C3E`
+  |= 1. The slipping node's leave checks C`+0x188` = 3 first.
+- **Not checked:** whether Link's normal AI lets the ragdoll last outside an event, and whether C`+0x17C` going
+  back to 0 is how the game ends one itself (`ragdoll.c` logs C`+0x17C` / `+0x188` as they change, tagged
+  `ragdoll:`). 1.0.0 offsets aren't known.

@@ -90,6 +90,7 @@ With the menu closed:
 
 | **save position (R + d-up)** | Remembers where Link is, which way he faces and the map (gz's save position). The first save in an area only finds Link's position in memory ("Locating Link's starting position, please try again"; he's lifted a little while it's tested, as with levitate, and it's quicker while he's moving): press it again once it says it's found him. |
 | **load position (R + d-down)** | Puts Link back there, facing the same way. Only in the same map. With nothing saved: "No position saved yet". |
+| **ragdoll** | Knocks Link down limp, the way the game's events do. Untick it to let him get up. It unticks itself if the game ends the ragdoll or the map changes. 1.1.1 only. |
 
 Under **return**: Link's **position** (x, y, z), his **current age** and the **map**.
 

@@ -89,6 +89,15 @@ struct z64hd_build {
   /* bool (actor, const float pos[3], float out[3], const void *riding, bool, int): the load's search for a safe
    * place round SavePos (FINDINGS 9.7); 0: not known for this build */
   uint32_t safety_search;
+  /* the ragdoll, as ExecuteEventPlayerImmediateRagdollDown does it (ragdoll.c, FINDINGS 9.9); 0: not known for
+   * this build */
+  uint32_t ragdoll_controller;   /* controller (object): Link's ragdoll controller, NULL if he has none */
+  uint32_t ragdoll_start;        /* void (controller, const request *) */
+  uint32_t ragdoll_end;          /* void (controller, const {actor, u8} *) */
+  uint32_t player_stop_linear;   /* void (player, const vec3f_t *, bool): sets the body's linear velocity */
+  uint32_t player_stop_angular;  /* the same for the angular velocity */
+  uint32_t player_play_as;       /* void (player, slot, const name table *, u8, u16): plays an animation (AS) */
+  uint32_t as_slipping_down;     /* the name table the node plays ("SlippingDown", "SlippingDownLand") */
   struct z64hd_link_path link_paths[5];
 };
 

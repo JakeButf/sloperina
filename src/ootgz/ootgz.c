@@ -37,6 +37,7 @@
 #include "nvn.h"
 #include "ootgz_version.h"
 #include "pouch.h"
+#include "ragdoll.h"
 #include "position.h"
 #include "lock.h"
 #include "sys.h"
@@ -391,6 +392,7 @@ static void frame(void)
   menus_research_frame();
   watches_frame(menu_current != 0);
   levitate_frame(menu_current != 0);
+  ragdoll_frame();
   position_frame(menu_current != 0);
   divetest_frame(menu_current != 0);
   lock_frame();
