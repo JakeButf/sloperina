@@ -359,7 +359,7 @@ gz's input display, at the bottom left unless you move it (hidden while the menu
 
 | Item | What it does |
 |---|---|
-| **enabled** | **L3** toggles floating. Hold **X** to rise, **B** to descend; release both to hover. The left stick moves horizontally. X/B/R3 are hidden from the game while floating; L3 is reserved while enabled. Taking an exit or loading zone ends levitation, and L3 can't start it again until the next map has loaded. |
+| **enabled** | **L3** toggles floating. Hold **X** to rise, **B** to descend; release both to hover. The left stick moves horizontally. X/B/R3 are hidden from the game while floating; L3 is reserved while enabled. Floating into a loading zone ends levitation there, so the zone takes Link as it would on foot (with **through walls** the game couldn't see him otherwise), and L3 can't start it again inside one or until the next map has loaded. **walk through walls** (cheats) also hands Link's collision back inside a loading zone. |
 | **through walls** | Use the character controller's temporary collision bypass and position setter while floating. L3/off restores its previous collision mode. Held B commands descent through floors. This and the two below are indented under **enabled**, as its options. |
 | **vertical speed** | X/B speed in units per second, replacing the old rise-speed label. Existing saved settings remain compatible; a saved **0** uses 4 units/s for manual movement. |
 | **move speed** | Horizontal speed in units per second. |

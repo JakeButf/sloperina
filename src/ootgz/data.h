@@ -73,10 +73,15 @@ extern const spawn_t     data_spawns[];      extern const int data_n_spawns;
  * invisible wall), 1 doesn't touch him on foot (enemies, NPCs, animals, camera...), 2 pushes him off (he can't stand
  * on it). */
 typedef struct { uint8_t type; float a[3], b[3]; float radius; } airshape_t; /* box: centre, half; cylinder: a, b, r */
+#define SHAPE_BOX 0 /* airshape_t type (gendata.py); any other is a cylinder */
 typedef struct { float t[3], r[3], s[3]; uint16_t first_shape; uint8_t n_shapes, kind; } airwall_t;
 typedef struct { const char *map; uint16_t first, n; } airmap_t;
 extern const airshape_t  data_airshapes[];
 extern const airwall_t   data_airwalls[];
 extern const airmap_t    data_airmaps[];     extern const int data_n_airmaps;
+/* loading zones (exits.json, tools/exits.py): each one's trigger volume, in the air walls' form (kind unused) */
+extern const airshape_t  data_exitshapes[];
+extern const airwall_t   data_exits[];
+extern const airmap_t    data_exitmaps[];    extern const int data_n_exitmaps;
 
 #endif

@@ -594,6 +594,17 @@ Objects:
   its intended address. The module files compile for aarch64.
 - **Not verified:** `1.0.0` has no store offsets, so locks there only show a notice that it will not work.
 
+### 5.22 Loading zones don't fire while Link's collision is off
+- **Symptom:** floating into a loading zone with levitate's **through walls** on did nothing; the exit fired as
+  soon as levitate was turned off (log: collision bypass off, then `exit taken to GanonCastle` 0.8 s later).
+- **Cause:** the bypass is the game's ForceNoHit mode on Link's controller bodies (cct.c), which also stops the
+  zone's trigger (an `Area` actor's rigid body sensor) from seeing him.
+- **Fix:** `tools/exits.py` builds `data/exits.json` from the map layouts: an `AiGroups` entry whose `Logic` is
+  `FieldDungeonEntranceSet` references the exit (`FieldAndDungeonEntranceEventRequestActor`, destination in
+  `NextBancParamName{Child,Adult}`) and its `Area`, a unit box (-0.5..0.5 across, 0..1 up) placed like an air wall
+  (151 zones in 49 maps, all boxes). levitate.c ends levitation (and walk through walls hands collision back) while
+  Link's middle is within 0.5 of one, and refuses L3 there. Doors entered with A aren't in this list.
+
 ## 6. Things that do not work
 
 - **Using character 0x7F for an icon:** menu, log, splash, and input panels already use it as an
