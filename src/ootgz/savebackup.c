@@ -21,10 +21,11 @@ bool save_backup_location;
 int save_backup_kinds = SAVE_BACKUP_BOTH;
 
 /* Which kind a commit is: the game's menu screen when it happened (the Enum 0x578D41E1, as gd_game_menu_screen;
- * FINDINGS §9.1). None: an autosave (a loading zone, an event). Option: the options alone, not backed up.
- * Any other (the save screen, game over's save prompt): a hard save. */
+ * FINDINGS §9.1). None or Loading: an autosave (a loading zone shows Loading while it saves; checked in Lichii).
+ * Option: the options alone, not backed up. Any other (the save screen, game over's save prompt): a hard save. */
 #define GD_MENU_SCREEN 0x578D41E1u
 #define MENU_SCREEN_NONE 0xB6EEDE09u   /* murmur3("None") */
+#define MENU_SCREEN_LOADING 0x9C031F08u /* murmur3("Loading") */
 #define MENU_SCREEN_OPTION 0xA60BA395u /* murmur3("Option") */
 static uint32_t menu_screen = MENU_SCREEN_NONE; /* as last seen on the game's thread (savebackup_frame) */
 enum { KIND_AUTO, KIND_HARD, KIND_OPTIONS };
@@ -257,7 +258,9 @@ static void back_up(const char *mount)
       strlen(mount) >= sizeof(last_mount) - 1)
     return;
   uint32_t screen = __atomic_load_n(&menu_screen, __ATOMIC_ACQUIRE);
-  int kind = screen == MENU_SCREEN_NONE ? KIND_AUTO : screen == MENU_SCREEN_OPTION ? KIND_OPTIONS : KIND_HARD;
+  int kind = screen == MENU_SCREEN_NONE || screen == MENU_SCREEN_LOADING ? KIND_AUTO
+           : screen == MENU_SCREEN_OPTION                                  ? KIND_OPTIONS
+                                                                           : KIND_HARD;
   bool wanted = kind == KIND_AUTO ? save_backup_kinds != SAVE_BACKUP_HARD
               : kind == KIND_HARD ? save_backup_kinds != SAVE_BACKUP_AUTO : false;
   if (!wanted) {
