@@ -74,5 +74,8 @@ bool        gd_game_paused(bool *is_pause, int32_t *pause_requests);
 /* The game's pause about to start: opening the pause screen or the map sets Sequence_IsPreGamePause and
  * Sequence_PreGamePauseRequestCount about 60 ms before gd_game_paused, while the menu fades in. */
 bool        gd_game_pausing(void);
+/* A screen of the game's menus is up: the pause screen's pages, the maps, save, game over... (an unnamed Enum,
+ * 0x578D41E1, None otherwise). The item wheel pauses the same way but leaves it None. True when unreadable. */
+bool        gd_game_menu_screen(void);
 
 #endif

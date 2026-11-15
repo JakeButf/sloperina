@@ -3,7 +3,7 @@
 #include "sys.h"
 
 /* ELF dynamic section tags */
-enum { DT_NULL = 0, DT_PLTRELSZ = 2, DT_STRTAB = 5, DT_SYMTAB = 6, DT_RELA = 7, DT_RELASZ = 8,
+enum { DT_NULL = 0, DT_PLTRELSZ = 2, DT_HASH = 4, DT_STRTAB = 5, DT_SYMTAB = 6, DT_RELA = 7, DT_RELASZ = 8,
        DT_JMPREL = 23 };
 
 /* AArch64 relocation types that fill a GOT slot with a symbol's address */
@@ -92,4 +92,44 @@ const char *got_hook(uintptr_t module, const char *name, void *replacement, void
   *next = target;
   __atomic_store_n(slot, (uintptr_t)replacement, __ATOMIC_RELEASE);
   return 0;
+}
+
+void *got_export(uintptr_t module, const char *name)
+{
+  uintptr_t mod0 = module + *(const uint32_t *)(module + MOD0_OFFSET_FIELD);
+  if (*(const uint32_t *)mod0 != MOD0_MAGIC)
+    return 0;
+  const dyn_t *dynamic = (const dyn_t *)(mod0 + *(const int32_t *)(mod0 + MOD0_DYNAMIC_FIELD));
+  uint64_t symtab = 0, strtab = 0, hash = 0;
+  for (int i = 0; i < MAX_DYNAMIC_ENTRIES && dynamic[i].tag != DT_NULL; i++) {
+    uint64_t offset = dynamic[i].val >= module ? dynamic[i].val - module : dynamic[i].val;
+    switch (dynamic[i].tag) {
+      case DT_SYMTAB: symtab = offset; break;
+      case DT_STRTAB: strtab = offset; break;
+      case DT_HASH: hash = offset; break;
+    }
+  }
+  if (!symtab || !strtab)
+    return 0;
+  /* the number of symbols: DT_HASH's nchain, else the symbol table runs up to the string table */
+  uint64_t count = hash ? ((const uint32_t *)(module + hash))[1]
+                 : strtab > symtab ? (strtab - symtab) / sizeof(sym_t) : 0;
+  const sym_t *symbols = (const sym_t *)(module + symtab);
+  for (uint64_t i = 1; i < count; i++)
+    if (symbols[i].shndx != SHN_UNDEF && symbols[i].value &&
+        same_string((const char *)(module + strtab + symbols[i].name), name))
+      return (void *)(module + symbols[i].value);
+  return 0;
+}
+
+uintptr_t got_module_of(uintptr_t addr)
+{
+  sys_meminfo_t region;
+  if (sys_query_memory(&region, addr) != 0 || !(region.perm & SYS_PERM_X))
+    return 0;
+  uintptr_t base = region.addr;
+  if (!sys_mapped(base, 8, SYS_PERM_R) || !sys_mapped(base + *(const uint32_t *)(base + MOD0_OFFSET_FIELD), 4, SYS_PERM_R) ||
+      *(const uint32_t *)(base + *(const uint32_t *)(base + MOD0_OFFSET_FIELD)) != MOD0_MAGIC)
+    return 0;
+  return base;
 }

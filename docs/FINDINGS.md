@@ -765,6 +765,16 @@ sloperinaGZ yet. Same build as everything else here.
   at 1 run `SeqOneShotRequestPause` with `PauseType` `GamePause`, back at 0 `SeqOneShotReleasePause`, and below 0
   raise an app error ("[Seq]GamePause underflow, please report"). Callers: `GamePauseOn`/`Off`,
   `PlusMinusPauseOff`, `OcarinaPauseOn`/`Off`, `ShortCutPauseOn`/`Off`.
+- **The item wheel pauses exactly like the pause screen** (`ShortCutPauseOn` runs `ChangePreGamePause` and
+  `GamePauseOn`: the same values, at the same times). What tells them apart is an unnamed Enum, `0x578D41E1`
+  (values `None`, `ItemMenu`, `EquipmentMenu`, `CollectMenu`, `SystemMenu`, `Save`, `Load`, `Option`, `ActionGuide`,
+  `ToTitle`, `WorldMap`, `DungeonMap`, `FieldMap`, `UnopenMap`, `ChallengeMenu`, `ChallengeMenuFullScreen`,
+  `ImportantMenu`, `Ocarina`, `Title`, `Loading`, `GameOver`): the menu screen that's up. Logged in Lichii
+  (debug > pause research, 2026-11-15): the wheel left it `None`; Plus set `ItemMenu` and Minus `UnopenMap` one
+  frame after the pre request, back to `None` with the post request. The wheel's own fields (`UI_IsNeedOpenShortCut`,
+  `UI_IsShortCutBCancel`, `UI_CurrentShortCutCategory`, `Sequence_ShortCutOpenHoldCounter`) didn't change.
+  **hide in game menus** now also needs it to be other than `None` (`gd_game_menu_screen`); paused with it `None`
+  (the wheel), **hide over item wheel** decides instead.
 - **The pause manager** is `*[main+0x4e97e38]`: `+0x00` the number of pause types (20), `+0x08` the type table,
   sorted by ID, 0x20 bytes per type: `+0x00` name, `+0x08` ID (MurmurHash3 of the name), `+0x0C` and `+0x10`
   bitmasks (probably what the type stops), `+0x1C` the request count (bit 31 is a separate flag; keep it). `+0x48`

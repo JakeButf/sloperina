@@ -331,3 +331,12 @@ bool gd_game_pausing(void)
   gd_get_int(GD_SEQUENCE_PRE_PAUSE_REQUEST_COUNT, &requests);
   return pre || requests > 0;
 }
+
+#define GD_MENU_SCREEN 0x578D41E1u      /* unnamed Enum: None, ItemMenu, ..., WorldMap, ..., GameOver */
+#define GD_MENU_SCREEN_NONE 0xB6EEDE09u /* murmur3("None") */
+
+bool gd_game_menu_screen(void)
+{
+  uint32_t screen;
+  return !gd_get_enum(GD_MENU_SCREEN, &screen) || screen != GD_MENU_SCREEN_NONE;
+}

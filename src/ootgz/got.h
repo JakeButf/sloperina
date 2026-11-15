@@ -18,4 +18,11 @@ uintptr_t *got_slot(uintptr_t module, const char *name);
  * Returns 0, or a message (the slot is then left alone). */
 const char *got_hook(uintptr_t module, const char *name, void *replacement, void *function, void **next);
 
+/* Address of a function or object `module` defines and exports under `name` (its dynamic symbols), or 0. For
+ * sdk functions this module doesn't import: an import rtld can't find would stop the game loading. */
+void *got_export(uintptr_t module, const char *name);
+
+/* The start of the module holding code at `addr` (its first mapped region: the text), or 0. */
+uintptr_t got_module_of(uintptr_t addr);
+
 #endif

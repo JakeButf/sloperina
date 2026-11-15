@@ -333,10 +333,13 @@ can, the `match` column says how sure the pick is; see the tool's help.
 and log), **background opacity** (0 to 100%, 100% at first; below 100% the game shows through, slightly behind) and
 **hide in game menus** (on at first): no watches, input display or log while the game's pause screen (Plus) or map
 (Minus) is open, so they don't cover it. They show again when it closes, and while this menu is open (to move them).
+They stay over the item wheel unless **hide over item wheel** is on.
+
+**hide over item wheel** (off at first): the same while the game's item wheel is up.
 
 **watch box header** (on at first): a small **watches** header over the watches box, underlined.
 
-**other settings**: the **input display**, **levitate** and **frame advance** menus below.
+**other settings**: the **input display**, **levitate**, **frame advance** and **save backups** menus below.
 
 #### 2.10.1 Input display
 
@@ -344,7 +347,7 @@ gz's input display, at the bottom left unless you move it (hidden while the menu
 
 | Item | What it does |
 |---|---|
-| **show** | Turn it on. |
+| **show** | Turn it on. The items below, up to **return**, are indented under it, as its options. |
 | **background** | Put it on a background, like the watches. |
 | **left stick**, **right stick**, **buttons** | What it shows. |
 | **style** | **row**: gz's line of stick values and buttons. **controller**: a Switch 2 Pro Controller with the buttons lighting up, rings for the sticks and their values underneath. **minimal**: a Pro Controller as one short line of outlines that fill while held. |
@@ -357,7 +360,7 @@ gz's input display, at the bottom left unless you move it (hidden while the menu
 | Item | What it does |
 |---|---|
 | **enabled** | **L3** toggles floating. Hold **X** to rise, **B** to descend; release both to hover. The left stick moves horizontally. X/B/R3 are hidden from the game while floating; L3 is reserved while enabled. Taking an exit or loading zone ends levitation, and L3 can't start it again until the next map has loaded. |
-| **through walls** | Use the character controller's temporary collision bypass and position setter while floating. L3/off restores its previous collision mode. Held B commands descent through floors. |
+| **through walls** | Use the character controller's temporary collision bypass and position setter while floating. L3/off restores its previous collision mode. Held B commands descent through floors. This and the two below are indented under **enabled**, as its options. |
 | **vertical speed** | X/B speed in units per second, replacing the old rise-speed label. Existing saved settings remain compatible; a saved **0** uses 4 units/s for manual movement. |
 | **move speed** | Horizontal speed in units per second. |
 
@@ -388,6 +391,23 @@ pause behavior have not been separately fixed.
 | **in pause screen** | Off (the default): while the game's pause screen or an item menu is open, the button is the game's and doesn't start frame advance. On: it starts frame advance there too. |
 | **pause icon** | gz's pause icon at the top left while paused. |
 | **button** | **L** or **R**. The game doesn't see that button while frame advance is on. |
+
+#### 2.10.4 Save backups
+
+After a save the game makes, the whole save folder (every slot, and the options) can be copied to
+`sloperinaGZ/save-backups/<date>_<time>/` on the SD card, e.g. `2026-11-15_21-30-05` (year first, so they sort by
+date). The newest 100 are kept; older ones are deleted. Each is about 1 MB. In **settings > save backups**, under
+**save backup options**:
+
+| Item | What it does |
+|---|---|
+| **enabled** | Turns save backups on. Off by default. The two below are its options. |
+| **back up** | **autosaves** (the game's own, at loading zones and events), **hard saves** (from the save screen, or game over's save prompt) or **both** (the default). Changing only the options is never backed up. |
+| **location in folder name** | Off by default. Adds where the save was made, as the game's save screen names it, after the date: `2026-11-15_21-30-05 - Temple of Time`. |
+
+The line under **return** shows the last backup this session and its kind, or why there's none. A notice, **save
+backed up**, shows after each one. To restore one, copy its contents back over the game's save folder with the game
+closed (on an emulator: right-click the game > *Open save data location*).
 
 ### 2.11 Log
 

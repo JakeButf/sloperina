@@ -27,6 +27,7 @@
 #include "airwall.h"
 #include "enemyhp.h"
 #include "flaglog.h"
+#include "savebackup.h"
 #include "overlayui.h"
 #include "divetest.h"
 #include "levitate.h"
@@ -74,14 +75,18 @@ bool frame_advance = false;
 bool frame_advance_in_pause = false;
 bool pause_display = true;
 bool hide_in_game_menus = true;
+bool hide_over_item_wheel = false;
 int frame_advance_button; /* 0 L, 1 R */
 
 /* settings > hide in game menus: the game's own menus (Plus, Minus) are open, or opening (from the frame
- * they start to fade in). gfx_frame keeps the HUD shown while sloperinaGZ's menu is open (it can be moved
- * then). */
+ * after they start to fade in). settings > hide over item wheel: the item wheel, which pauses the same way
+ * but shows no menu screen (FINDINGS §9.1). gfx_frame keeps the HUD shown while sloperinaGZ's menu is open
+ * (it can be moved then). */
 static bool hud_hidden(void)
 {
-  return hide_in_game_menus && (gd_game_pausing() || gd_game_paused(0, 0));
+  if (!gd_game_pausing() && !gd_game_paused(0, 0))
+    return false;
+  return gd_game_menu_screen() ? hide_in_game_menus : hide_over_item_wheel;
 }
 
 /* Held (not as a shortcut) for FA_HOLD_MS, the button advances a frame every FA_REPEAT_MS
@@ -401,6 +406,7 @@ static void frame(void)
   settings_frame(menu_current != 0);
   settings_log_frame();
   flaglog_frame(true); /* what this frame's menu and cheats changed */
+  savebackup_frame();
   fa_frame(); /* last: the frame's work is done before the game is held */
 }
 
@@ -487,6 +493,11 @@ __attribute__((used)) void ootgz_module_init(void)
     log_raw(error);
   error = input_hook_game(z64hd_main);
   log_raw(error ? "input hook failed" : "input hook installed");
+  if (error)
+    log_raw(error);
+  /* nn::fs::CommitSaveData, for settings > back up saves */
+  error = savebackup_hook_game(z64hd_main);
+  log_raw(error ? "save hook failed" : "save hook installed");
   if (error)
     log_raw(error);
 }

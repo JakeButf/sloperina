@@ -9,6 +9,7 @@
 #include "airwall.h"
 #include "enemyhp.h"
 #include "flaglog.h"
+#include "savebackup.h"
 #include "memview.h"
 #include "osk.h"
 #include "build_info.h" /* made by the Makefile: BUILD_WHEN, BUILD_VERSION */
@@ -2323,17 +2324,6 @@ static menu_t m_settings, m_input_display, m_levitate, m_frame_advance;
 static const char *const opacity_names[] = { "0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%",
                                              "90%", "100%" };
 static const char *const size_names[] = { "auto", "small (2x)", "medium (2.5x)", "large (3x)" };
-static const char *const style_names[GFX_STYLES] = { [GFX_STYLE_GAME] = "the game's", [GFX_STYLE_GZ] = "gz" };
-
-static int get_style(menu_item_t *it)
-{
-  return gfx_style;
-}
-
-static void set_style(menu_item_t *it, int style)
-{
-  gfx_style = style;
-}
 
 static int get_size(menu_item_t *it)
 {
@@ -2542,6 +2532,85 @@ static void set_hide_in_game_menus(menu_item_t *it, bool on)
   hide_in_game_menus = on;
 }
 
+static bool get_hide_over_item_wheel(menu_item_t *it)
+{
+  return hide_over_item_wheel;
+}
+
+static void set_hide_over_item_wheel(menu_item_t *it, bool on)
+{
+  hide_over_item_wheel = on;
+}
+
+/* settings > save backups (savebackup.h) */
+static menu_t m_save_backups;
+
+static bool get_save_backups(menu_item_t *it)
+{
+  return save_backup_enabled;
+}
+
+static void set_save_backups(menu_item_t *it, bool on)
+{
+  save_backup_enabled = on;
+}
+
+static bool get_save_backup_location(menu_item_t *it)
+{
+  return save_backup_location;
+}
+
+static void set_save_backup_location(menu_item_t *it, bool on)
+{
+  save_backup_location = on;
+}
+
+static const char *const save_kind_names[] = { "autosaves", "hard saves", "both" };
+
+static int get_save_kinds(menu_item_t *it)
+{
+  return save_backup_kinds;
+}
+
+static void set_save_kinds(menu_item_t *it, int choice)
+{
+  save_backup_kinds = choice;
+}
+
+static void text_save_backups(menu_item_t *it, char *buf, int len)
+{
+  savebackup_status_text(buf, len);
+}
+
+static void build_save_backups(void)
+{
+  menu_init(&m_save_backups, "save backups", 7);
+  menu_add_heading(&m_save_backups, "save backup options");
+  menu_item_t *backups = menu_add_check(&m_save_backups, "enabled", get_save_backups, set_save_backups, 0);
+  if (backups) {
+    backups->hint = "after a save, copy the game's save folder to save-backups/ on the SD card (the newest 100 kept)";
+    backups->log_label = "save backups:";
+  }
+  menu_item_t *kinds = menu_add_option(&m_save_backups, "back up", ARRAY_LEN(save_kind_names), save_kind_names,
+                                       get_save_kinds, set_save_kinds, 0);
+  if (kinds) {
+    kinds->indent = 2; /* under enabled */
+    kinds->hint = "autosaves (loading zones, events), hard saves (the save screen), or both";
+    kinds->log_label = "save backups of";
+  }
+  menu_item_t *where = menu_add_check(&m_save_backups, "location in folder name", get_save_backup_location,
+                                      set_save_backup_location, 0);
+  if (where) {
+    where->indent = 2;
+    where->hint = "add the save's location after the date in the folder name, e.g. \"<date> - Temple of Time\"";
+    where->log_label = "location in folder name:";
+  }
+  menu_end_group(&m_save_backups);
+  menu_add_return(&m_save_backups);
+  menu_add_text(&m_save_backups, text_save_backups, 0);
+  m_save_backups.footer = 1;
+}
+
 static bool get_pause_display(menu_item_t *it)
 {
   return pause_display;
@@ -2598,6 +2667,8 @@ static void build_input_display(void)
     show->hint = "the sticks and the buttons held (hidden while the menu is open)";
     show->log_label = "input display";
   }
+  /* show's options, under it */
+  int first_option = m_input_display.n_items;
   menu_item_t *background = menu_add_check(&m_input_display, "background", get_input_bg, set_input_bg, 0);
   if (background)
     background->hint = "behind the whole input display, as the watches have";
@@ -2627,8 +2698,12 @@ static void build_input_display(void)
     move->hint = "L: move the input display around the screen";
     move->edit_hint = "input display: d-pad moves it   L: done";
   }
+  for (int i = first_option; i < m_input_display.n_items; i++)
+    m_input_display.items[i].indent = 2;
   menu_end_group(&m_input_display);
-  menu_add_return(&m_input_display);
+  menu_item_t *back = menu_add_return(&m_input_display);
+  if (back)
+    back->indent = 1; /* level with show */
 }
 
 static void build_levitate(void)
@@ -2638,13 +2713,16 @@ static void build_levitate(void)
   menu_item_t *lv = menu_add_check(&m_levitate, "enabled", get_levitate, set_levitate, 0);
   if (lv)
     lv->hint = "L3: toggle   X: up   B: down   release: hover", lv->log_label = "levitate";
+  /* enabled's options, under it */
   menu_item_t *walls = menu_add_check(&m_levitate, "through walls", get_walls, set_walls, 0);
   if (walls)
-    walls->hint = "Disable Link collision while floating; B descends through floors";
+    walls->indent = 2, walls->hint = "Disable Link collision while floating; B descends through floors";
   menu_item_t *rise = menu_add_option(&m_levitate, "vertical speed", 7, lev_speed_names, get_lev_speed, set_lev_speed, 0);
   if (rise)
-    rise->hint = "X/B speed; legacy 0 uses 4. Release to hover";
-  menu_add_option(&m_levitate, "move speed", 7, lev_move_names, get_lev_move, set_lev_move, 0);
+    rise->indent = 2, rise->hint = "X/B speed; legacy 0 uses 4. Release to hover";
+  menu_item_t *move = menu_add_option(&m_levitate, "move speed", 7, lev_move_names, get_lev_move, set_lev_move, 0);
+  if (move)
+    move->indent = 2;
   menu_end_group(&m_levitate);
   menu_add_return(&m_levitate);
   /* what can only be read, under return after a blank line */
@@ -2654,7 +2732,7 @@ static void build_levitate(void)
 
 static void build_settings(void)
 {
-  menu_init(&m_settings, "settings", 13);
+  menu_init(&m_settings, "settings", 16);
   menu_add_heading(&m_settings, "menu settings");
   menu_item_t *language = menu_add_option(&m_settings, "language", 1, lang_names(), get_lang, set_lang, 0);
   if (language)
@@ -2665,14 +2743,15 @@ static void build_settings(void)
   menu_item_t *opacity = menu_add_option(&m_settings, "background opacity", ARRAY_LEN(opacity_names), opacity_names,
                                          get_opacity, set_opacity, 0);
   if (opacity)
-    opacity->hint = "the backdrop's opacity (gz's style below 100%: slower, and lags 2 frames)";
-  menu_item_t *style = menu_add_option(&m_settings, "style", GFX_STYLES, style_names, get_style, set_style, 0);
-  if (style)
-    style->hint = "the game's type, buttons and backdrop, or gz's pixel font";
+    opacity->hint = "the backdrop's opacity";
   menu_item_t *hide = menu_add_check(&m_settings, "hide in game menus", get_hide_in_game_menus,
                                      set_hide_in_game_menus, 0);
   if (hide)
     hide->hint = "no watches, input display or log over the game's pause screen and map";
+  menu_item_t *wheel = menu_add_check(&m_settings, "hide over item wheel", get_hide_over_item_wheel,
+                                      set_hide_over_item_wheel, 0);
+  if (wheel)
+    wheel->hint = "no watches, input display or log while the game's item wheel is up";
   menu_item_t *header = menu_add_check(&m_settings, "watch box header", get_header, set_header, 0);
   if (header) {
     header->hint = "a small \"watches\" header over the watches box, underlined";
@@ -2683,10 +2762,12 @@ static void build_settings(void)
   menu_add_submenu(&m_settings, "input display", &m_input_display);
   menu_add_submenu(&m_settings, "levitate", &m_levitate);
   menu_add_submenu(&m_settings, "frame advance", &m_frame_advance);
+  menu_add_submenu(&m_settings, "save backups", &m_save_backups);
   menu_end_group(&m_settings);
   menu_add_return(&m_settings);
 
   build_frame_advance();
+  build_save_backups();
   build_input_display();
   build_levitate();
 }
@@ -2813,6 +2894,45 @@ static int32_t pause_value(int i)
   return gd_get_bool(pause_fields[i].hash, &flag) ? flag : NUM_UNKNOWN;
 }
 
+/* Logged with them, not in the menu: what might tell the item wheel (ShortCut) from the pause screen and map,
+ * which raise the same pause (FINDINGS §9.1). 'b' Bool, 'e' Enum (its murmur3 hash), 'f' Float. */
+static const struct { const char *name; uint32_t hash; char type; } research_extra[] = {
+  { "UI_IsNeedOpenShortCut", 0xE596D2BBu, 'b' }, { "UI_IsShortCutBCancel", 0x16BF1503u, 'b' },
+  { "UI_CurrentShortCutCategory", 0x2852C25Cu, 'e' }, { "Sequence_ShortCutOpenHoldCounter", 0x28CB0DE7u, 'f' },
+  { "Sequence_IsDisableTransitionPlusMenu", 0x9B24B37Cu, 'b' }, { "menu screen (0x578D41E1)", 0x578D41E1u, 'e' },
+};
+#define N_RESEARCH_EXTRA ARRAY_LEN(research_extra)
+static uint32_t extra_last[N_RESEARCH_EXTRA]; /* the raw bits (a float's too); NUM_UNKNOWN unreadable */
+
+static uint32_t extra_value(int i)
+{
+  bool flag;
+  uint32_t value;
+  float f;
+  switch (research_extra[i].type) {
+    case 'b': return gd_get_bool(research_extra[i].hash, &flag) ? flag : (uint32_t)NUM_UNKNOWN;
+    case 'e': return gd_get_enum(research_extra[i].hash, &value) ? value : (uint32_t)NUM_UNKNOWN;
+    default:
+      if (!gd_get_float(research_extra[i].hash, &f))
+        return (uint32_t)NUM_UNKNOWN;
+      memcpy(&value, &f, sizeof(value));
+      return value;
+  }
+}
+
+static void extra_text(int i, uint32_t raw, char *buf, int len)
+{
+  float f;
+  if (raw == (uint32_t)NUM_UNKNOWN)
+    snprintf(buf, len, "??");
+  else if (research_extra[i].type == 'e')
+    snprintf(buf, len, "%08x", (unsigned)raw);
+  else if (research_extra[i].type == 'f')
+    memcpy(&f, &raw, sizeof(f)), snprintf(buf, len, "%.2f", f);
+  else
+    snprintf(buf, len, "%u", (unsigned)raw);
+}
+
 void menus_research_frame(void)
 {
   if (!pause_log)
@@ -2823,6 +2943,16 @@ void menus_research_frame(void)
       log_printf("pause research: frame %u: %s %d -> %d", (unsigned)frame_counter(), pause_fields[i].name,
                  (int)pause_last[i], (int)value);
     pause_last[i] = value;
+  }
+  for (int i = 0; i < N_RESEARCH_EXTRA; i++) {
+    uint32_t value = extra_value(i);
+    if (pause_seen && value != extra_last[i]) {
+      char was[24], now[24];
+      extra_text(i, extra_last[i], was, sizeof(was));
+      extra_text(i, value, now, sizeof(now));
+      log_printf("pause research: frame %u: %s %s -> %s", (unsigned)frame_counter(), research_extra[i].name, was, now);
+    }
+    extra_last[i] = value;
   }
   pause_seen = true;
 }
