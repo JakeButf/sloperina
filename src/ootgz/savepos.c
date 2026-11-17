@@ -230,7 +230,7 @@ typedef struct {
   uint32_t frame;    /* frames_seen when it ran */
 } search_t;
 
-/* round the slot a save keeps (yellow), and round slot B as the ocarina would set it (white) */
+/* round the slot a save keeps (yellow), and round slot B as the ocarina would set it (pale yellow) */
 static search_t load_search = { .name = "load" };
 static search_t ocarina_search = { .name = "load after the ocarina" };
 static uint32_t frames_seen;

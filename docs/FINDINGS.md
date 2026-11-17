@@ -1010,7 +1010,7 @@ point.
       if `[actor+0x270]+0x460` `+0xA8` bit 1 is clear, or if P`+0x1C54` bit 0 is set.
     - **Putting the ocarina away** is an event. In the frame it ends, the flags are rebuilt while it's still running
       (no bit 24) and the update runs after it has ended, so the point jumps to Link once. The mod only shows where
-      bit 24 or 20 holds the point (`savepos.c`, an orange mark); it doesn't move the point. Clearing the bit from the
+      bit 24 or 20 holds the point (`savepos.c`, a dark green mark); it doesn't move the point. Clearing the bit from the
       mod's frame does nothing: the mod runs outside the window between the rebuild and the update.
 
   On map collision the point becomes the actor's position (`actor+0x31C`), stored at P`+0x18A4` with yaw P`+0x18C4`,

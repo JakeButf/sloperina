@@ -2359,7 +2359,7 @@ static void build_savepos(void)
   menu_init(&m_savepos, "save position", 8);
   menu_item_t *show = menu_add_check(&m_savepos, "show slots", get_savepos_shown, set_savepos_shown, 0);
   if (show) {
-    show->hint = "pink: slot a  green: slot b  cross: the one a save keeps  orange: where the ocarina would move b";
+    show->hint = "pink: slot a  green: slot b  cross: the one a save keeps  dark green: where the ocarina would move b";
     show->log_label = "save slots:";
   }
   menu_item_t *load = menu_add_check(&m_savepos, "where a load puts link", get_savepos_load, set_savepos_load, 0);

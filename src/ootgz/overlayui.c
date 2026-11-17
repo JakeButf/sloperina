@@ -61,8 +61,8 @@ static const gpu_colour_t line_colours[AW_NCOLORS] = {
   [AW_VOID_DEADLY] = { 1.0f, 0.16f, 0.14f, 1 },  /* red: a deadly cell, or the ring once Link is past it */
   [AW_VOID_RING] = { 1.0f, 0.56f, 0.12f, 1 },    /* orange: the ring Link has to stay in off the map */
   [AW_VOID_AREA] = { 0.72f, 0.36f, 1.0f, 1 },    /* purple: an area that voids Link inside it */
-  [AW_OCARINA] = { 1.0f, 0.52f, 0.12f, 1 },   /* orange: slot B if the ocarina were put away (savepos.c) */
-  [AW_OCARINA_LOAD] = { 0.95f, 0.95f, 0.95f, 1 }, /* white: where a load puts Link from it */
+  [AW_OCARINA] = { 0.10f, 0.60f, 0.25f, 1 },   /* dark green: slot B if the ocarina were put away (savepos.c) */
+  [AW_OCARINA_LOAD] = { 1.0f, 1.0f, 0.70f, 1 },   /* pale yellow: where a load puts Link from it */
 };
 
 /* budget: the quads the lines may take. Short of them, the glows go first, then the farthest lines. */
