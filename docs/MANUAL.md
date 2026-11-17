@@ -111,6 +111,7 @@ and you'll come out at the chosen place. Under **return**: the **current** map a
 | **reload map** | Reloads the current map (at the age set in **link**). |
 | *collision* | |
 | **environment** | See below. |
+| **void out** | See [2.3.3](#233-void-out). |
 | *save and load* | |
 | **save position** | See [2.3.2](#232-save-position). |
 | *enemies* | |
@@ -149,6 +150,33 @@ up to 5 m away, so Link can still appear somewhere else.
 The lines under the menu give each slot's x, y, z and the way Link will face (degrees), with a **\*** on
 the one a save would keep, or **not set**, or **not found** (the title screen, loading, 1.0.0); and where a load
 would put Link and how far that is from the slot, or **stays**.
+
+#### 2.3.3 Void out
+
+Where Link voids (1.1.1 only), drawn over the game from the game's own ground map. The void check doesn't use
+the collision: each frame the game looks straight down from Link into a map of one-unit cells that mark
+walkable ground, and keeps the nearest such cell it has found round Link. Link voids when the cell underneath
+is a deadly one, or when nothing is underneath and that nearest cell is 8 units or more away to the side.
+
+| Item | What it does |
+|---|---|
+| **show** | Draw the parts ticked under it (its options, indented below it). |
+| **edge of the ground map** | **White**: where the mapped ground ends. Past the line the game finds nothing under Link. Not voiding by itself: see the fence. Off by default. |
+| **deadly cells** | **Red**: columns over the cells that void Link at once. A column runs from its cell up to the next mapped ground over it, because the game looks down from any height: anywhere inside one voids. On by default. |
+| **8 unit fence** | **Orange**: a ring 8 units round the ground cell the game is holding for Link now. With nothing underfoot, Link voids on leaving it; it turns **red** when that happens. The rule only measures sideways, so the real boundary has no top or bottom: 4 units of it are drawn at Link's height. A line runs from Link to the cell while Link is off the map. On by default. |
+| **void areas** | **Purple**: the areas placed in the map that void whatever is inside them, **red** while Link is in one. The holes down into grottos are made the same way and are drawn too (thin discs at the hole). On by default. |
+| **through the scenery** | Also draw all of it where the scenery is in front (otherwise it's hidden behind the scenery, in the game's style). |
+
+The columns, the fence and the void areas have see-through sides. The line under the menu, below **return**,
+says where Link stands for the game: **on the map**, **off the map** with how far the held cell is out of 8, or
+**VOID** with the rule that fired. Each void from the ground map also goes in the log file with what caused it and
+where (`void out: ...`).
+
+Not drawn: floors the game tags as an abyss, which void on touch (the whole game has one, at the bottom of the
+Shadow Temple's chasm), the ground map's own outer box (leaving it
+by more than 5 units voids; it's named in the log when it happens), and a few dungeon rooms' own void scripts. The
+cells round Link are read again every two seconds or when Link has moved 4 units, out to 24 units to the side, 48 units down
+and 16 units up; where there are more lines than fit, the farthest are left out.
 
 ### 2.4 Cheats
 
@@ -380,7 +408,7 @@ falls are unchanged. The old short health-refund timer has been removed.
 
 The user confirmed traversal through a previously blocking wall, followed by a gentle L3 fall
 and no landing damage. This does not establish behavior at every surface or during every event.
-Void protection and a void-trigger viewer are not included. Camera-follow and stationary-position
+Void protection is not included (what voids Link can be seen with [2.3.3](#233-void-out)). Camera-follow and stationary-position
 pause behavior have not been separately fixed.
 
 #### 2.10.3 Frame advance
@@ -441,6 +469,7 @@ The name and version, the build date ("Build Date: ..."), and the website.
 | Pause icon | Top left | Two bars: paused by frame advance. |
 | Air walls | Over the game | [2.3.1](#231-environment) |
 | Save slots | Over the game | [2.3.2](#232-save-position) |
+| Void out | Over the game | [2.3.3](#233-void-out) |
 
 ## 4 About frame advance
 
@@ -467,7 +496,7 @@ game's pause screen closed):
 Settings are saved on the SD card in `sloperinaGZ/settings.ini` (on an emulator, its virtual SD card) a couple of
 seconds after you close the menu. It's plain `key=value` text: cheats, watches (which, in what order, their types,
 names and whether shown), the watches box, menu size, background, hiding in game menus, language, input display,
-levitate, frame advance, save position and flag logging. Delete it to go back to the defaults. Your game saves are never touched.
+levitate, frame advance, save position, flag logging and void out. Delete it to go back to the defaults. Your game saves are never touched.
 
 The game's pictures sloperinaGZ uses (the controllers in the input display, the menus' parts, the item icons)
 are kept in `sloperinaGZ/cache/` once they're made from your copy of the game, so later starts don't have to make

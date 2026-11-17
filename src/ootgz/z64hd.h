@@ -89,6 +89,10 @@ struct z64hd_build {
   /* bool (actor, const float pos[3], float out[3], const void *riding, bool, int): the load's search for a safe
    * place round SavePos (FINDINGS 9.7); 0: not known for this build */
   uint32_t safety_search;
+  /* the ground map the void check reads (voidmap.c, FINDINGS 9.8): the slot its owner is reached from, and the
+   * table of its record formats; 0: not known for this build */
+  uint32_t voxel_mgr_ptr;
+  uint32_t voxel_formats;
   struct z64hd_link_path link_paths[5];
 };
 

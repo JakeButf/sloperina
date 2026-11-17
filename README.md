@@ -27,7 +27,7 @@ goes back.
 
 - **link**: health, heart containers, rupees, age and reload map; position, speed and map.
 - **warps**: any map and spawn point, at once, with the game's own fade.
-- **scene**: reload the map; the map's air walls drawn over the game (collision).
+- **scene**: reload the map; the map's air walls drawn over the game (collision); where Link voids out.
 - **cheats**: infinite health, rupees, magic and ammo; 2x movement speed.
 - **inventory**: items, equipment, collection (upgrades, strength, scale, magic), bottles, quest items, songs,
   dungeon items and small keys, all through the game's own code where it needs it.

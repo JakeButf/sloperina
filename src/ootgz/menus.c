@@ -20,6 +20,7 @@
 #include "lock.h"
 #include "position.h"
 #include "savepos.h"
+#include "voidmap.h"
 #include "link.h"
 #include "menu.h"
 #include "input.h"
@@ -2227,6 +2228,119 @@ static void text_savepos_load(menu_item_t *it, char *buf, int len)
   savepos_load_text(buf, len);
 }
 
+static bool get_voids_shown(menu_item_t *it)
+{
+  return voidmap_shown;
+}
+
+static void set_voids_shown(menu_item_t *it, bool on)
+{
+  voidmap_shown = on;
+}
+
+static bool get_voids_ground(menu_item_t *it)
+{
+  return voidmap_ground;
+}
+
+static void set_voids_ground(menu_item_t *it, bool on)
+{
+  voidmap_ground = on;
+}
+
+static bool get_voids_deadly(menu_item_t *it)
+{
+  return voidmap_deadly;
+}
+
+static void set_voids_deadly(menu_item_t *it, bool on)
+{
+  voidmap_deadly = on;
+}
+
+static bool get_voids_ring(menu_item_t *it)
+{
+  return voidmap_ring;
+}
+
+static void set_voids_ring(menu_item_t *it, bool on)
+{
+  voidmap_ring = on;
+}
+
+static bool get_voids_areas(menu_item_t *it)
+{
+  return voidmap_areas;
+}
+
+static void set_voids_areas(menu_item_t *it, bool on)
+{
+  voidmap_areas = on;
+}
+
+static bool get_voids_xray(menu_item_t *it)
+{
+  return voidmap_xray;
+}
+
+static void set_voids_xray(menu_item_t *it, bool on)
+{
+  voidmap_xray = on;
+}
+
+static void text_voids_link(menu_item_t *it, char *buf, int len)
+{
+  char text[64];
+  voidmap_text(text, sizeof(text));
+  snprintf(buf, len, TF("link   %s"), text);
+}
+
+static menu_t m_voids;
+
+static void build_voids(void)
+{
+  menu_init(&m_voids, "void out", 8);
+  menu_item_t *show = menu_add_check(&m_voids, "show", get_voids_shown, set_voids_shown, 0);
+  if (show) {
+    show->hint = "where the game's ground map voids link, round link";
+    show->log_label = "void out:";
+  }
+  menu_item_t *ground = menu_add_check(&m_voids, "edge of the ground map", get_voids_ground, set_voids_ground, 0);
+  if (ground) {
+    ground->hint = "white: past it the game finds nothing under link";
+    ground->log_label = "void out, ground edge:";
+    ground->indent = 2; /* under show */
+  }
+  menu_item_t *deadly = menu_add_check(&m_voids, "deadly cells", get_voids_deadly, set_voids_deadly, 0);
+  if (deadly) {
+    deadly->hint = "red: anywhere in one of these columns link voids at once";
+    deadly->log_label = "void out, deadly cells:";
+    deadly->indent = 2;
+  }
+  menu_item_t *ring = menu_add_check(&m_voids, "8 unit fence", get_voids_ring, set_voids_ring, 0);
+  if (ring) {
+    ring->hint = "orange: off the map link voids on leaving it";
+    ring->log_label = "void out, fence:";
+    ring->indent = 2;
+  }
+  menu_item_t *areas = menu_add_check(&m_voids, "void areas", get_voids_areas, set_voids_areas, 0);
+  if (areas) {
+    areas->hint = "purple: placed in the map, link voids inside one   red: link is in it";
+    areas->log_label = "void out, areas:";
+    areas->indent = 2;
+  }
+  menu_item_t *xray = menu_add_check(&m_voids, "through the scenery", get_voids_xray, set_voids_xray, 0);
+  if (xray) {
+    xray->hint = "also where the scenery is in front of them (the game's style)";
+    xray->log_label = "void out through the scenery:";
+    xray->indent = 2;
+  }
+  menu_add_return(&m_voids);
+  /* link now: under the list, not part of it */
+  menu_add_text(&m_voids, text_voids_link, 0);
+  m_voids.footer = 1;
+}
+
 static menu_t m_savepos;
 
 static void build_savepos(void)
@@ -2254,12 +2368,14 @@ static void build_savepos(void)
 static void build_scene(void)
 {
   build_savepos();
-  menu_init(&m_scene, "scene", 9);
+  build_voids();
+  menu_init(&m_scene, "scene", 10);
   menu_item_t *reload = menu_add_action(&m_scene, "reload map", act_reload_map, 0);
   if (reload)
     reload->hint = "L: reload this map (at the age set in the link menu)";
   menu_add_heading(&m_scene, "collision");
   menu_add_submenu(&m_scene, "environment", &m_collision);
+  menu_add_submenu(&m_scene, "void out", &m_voids);
   menu_add_heading(&m_scene, "save and load");
   menu_add_submenu(&m_scene, "save position", &m_savepos);
   menu_add_heading(&m_scene, "enemies");

@@ -22,6 +22,7 @@
 #include "savepos.h"
 #include "sys.h"
 #include "view.h"
+#include "voidmap.h"
 
 float sinf(float x); /* from sdk */
 float cosf(float x);
@@ -48,6 +49,9 @@ bool airwalls_push = true, airwalls_block = true;
  * each way round him (with his shield) */
 #define DEPTH_MARGIN_M 0.03f
 #define DEPTH_MARGIN_SHARE 0.003f
+/* the same for a line the scenery hides: it lies on the ground map's cells, which the ground weaves through */
+#define SCENE_MARGIN_M 0.30f
+#define SCENE_MARGIN_SHARE 0.01f
 #define LINK_FEET 0.04f /* the ground under him is this much lower than what's taken for him (his boots are) */
 #define LINK_TOP_CHILD 1.45f
 #define LINK_TOP_ADULT 2.05f
@@ -59,9 +63,11 @@ bool airwalls_push = true, airwalls_block = true;
 #define WALL_KIND_BLOCKS 0 /* the kinds of wall (data.h airwall_t): stops Link */
 #define WALL_KIND_OTHER 1  /* doesn't touch him on foot */
 #define WALL_KIND_PUSHES 2 /* pushes him off */
+#define WALL_KIND_VOIDS 3  /* not a wall: an area that voids Link inside it (voidmap.h's to show) */
 #define CYLINDER_SEGMENTS 16
 #define CYLINDER_SIDE_EVERY 4 /* a side line at every 4th segment: four in all */
 #define TWO_PI 6.2831853f
+#define MIN_SCALE 1e-9f       /* a wall's scale is taken as at least this, where a point is divided by it */
 
 /* --- geometry, worked out once per map ------------------------------------------------------------ */
 
@@ -71,8 +77,10 @@ static struct {
   float R[9]; /* rotation, row-major */
   float centre[3], radius;
   uint16_t first_edge, n_edges;
+  uint16_t first_point, n_points;
 } wall_geo[MAX_WALLS];
 static int n_walls;
+static int n_air_walls; /* of them: the rest are void areas */
 static float points[MAX_POINTS][3];
 static uint16_t edges[MAX_EDGES][2];
 static int n_points, n_edges;
@@ -82,18 +90,40 @@ static const airwall_t *map_wall(int index)
   return &data_airwalls[current_map->first + index];
 }
 
+static bool void_areas_shown(void)
+{
+  return voidmap_shown && voidmap_areas;
+}
+
+static bool is_void_area(const airwall_t *wall)
+{
+  return wall->kind == WALL_KIND_VOIDS;
+}
+
+/* an air wall of a ticked kind: what the air wall watch looks at, whether or not the walls are drawn */
 static bool wall_shown(const airwall_t *wall)
 {
   switch (wall->kind) {
+  case WALL_KIND_VOIDS:  return false;
   case WALL_KIND_BLOCKS: return airwalls_block;
   case WALL_KIND_PUSHES: return airwalls_push;
   default:               return airwalls_all;
   }
 }
 
+static bool wall_drawn(const airwall_t *wall)
+{
+  return is_void_area(wall) ? void_areas_shown() : airwalls_shown && wall_shown(wall);
+}
+
 static uint8_t wall_colour(const airwall_t *wall)
 {
-  return wall->kind == WALL_KIND_BLOCKS ? AW_BLOCKS : wall->kind == WALL_KIND_PUSHES ? AW_PUSHES : AW_OTHER;
+  switch (wall->kind) {
+  case WALL_KIND_VOIDS:  return AW_VOID_AREA;
+  case WALL_KIND_BLOCKS: return AW_BLOCKS;
+  case WALL_KIND_PUSHES: return AW_PUSHES;
+  default:               return AW_OTHER;
+  }
 }
 
 /* R = Rz Ry Rx for rotation angles (x, y, z) */
@@ -201,10 +231,12 @@ static void bounding_sphere(const airwall_t *wall, int first_point, float centre
 static void build_map_geometry(const airmap_t *map)
 {
   n_walls = 0;
+  n_air_walls = 0;
   n_points = 0;
   n_edges = 0;
   for (int i = 0; i < map->n && n_walls < MAX_WALLS; i++) {
     const airwall_t *wall = &data_airwalls[map->first + i];
+    n_air_walls += wall->kind != WALL_KIND_VOIDS;
     __typeof__(wall_geo[0]) *geo = &wall_geo[n_walls++];
     rotation_matrix(wall->r, geo->R);
     geo->first_edge = (uint16_t)n_edges;
@@ -217,6 +249,8 @@ static void build_map_geometry(const airmap_t *map)
         add_cylinder(wall, geo->R, shape);
     }
     geo->n_edges = (uint16_t)(n_edges - geo->first_edge);
+    geo->first_point = (uint16_t)first_point;
+    geo->n_points = (uint16_t)(n_points - first_point);
     bounding_sphere(wall, first_point, geo->centre, &geo->radius);
   }
   log_printf("air walls: %s: %d of %d walls, %d points, %d edges", map->map, n_walls, map->n, n_points, n_edges);
@@ -299,28 +333,71 @@ static float depth_inside(int index, const float P[3], int *up)
   return 0;
 }
 
+/* Whether P is in one of wall `index`'s cylinders (depth_inside only knows boxes): in the wall's own unscaled
+ * space, between the ends along the axis and within the radius of it. */
+static bool in_cylinder(int index, const float P[3])
+{
+  const airwall_t *wall = map_wall(index);
+  const float *R = wall_geo[index].R;
+  float d[3] = { P[0] - wall->t[0], P[1] - wall->t[1], P[2] - wall->t[2] };
+  float local[3];
+  for (int i = 0; i < 3; i++) {
+    float scale = wall->s[i] < 0 ? -wall->s[i] : wall->s[i];
+    local[i] = (R[i] * d[0] + R[3 + i] * d[1] + R[6 + i] * d[2]) / (scale < MIN_SCALE ? MIN_SCALE : scale);
+  }
+  for (int k = 0; k < wall->n_shapes; k++) {
+    const airshape_t *cylinder = &data_airshapes[wall->first_shape + k];
+    if (cylinder->type == SHAPE_BOX)
+      continue;
+    float axis[3], from_a[3], along = 0, length2 = 0, off2 = 0;
+    for (int i = 0; i < 3; i++) {
+      axis[i] = cylinder->b[i] - cylinder->a[i];
+      from_a[i] = local[i] - cylinder->a[i];
+      along += from_a[i] * axis[i];
+      length2 += axis[i] * axis[i];
+    }
+    if (length2 <= 0 || along <= 0 || along >= length2)
+      continue;
+    for (int i = 0; i < 3; i++) {
+      float off = from_a[i] - axis[i] * along / length2;
+      off2 += off * off;
+    }
+    if (off2 < cylinder->radius * cylinder->radius)
+      return true;
+  }
+  return false;
+}
+
 static float link_depth;
 static int link_wall = -1; /* the wall Link is deepest in, or -1 */
 static int link_up;
+static int link_area = -1; /* the void area Link is in, while they're drawn, or -1 */
 
 static void check_link(void)
 {
   vec3f_t drawn;
   link_wall = -1;
+  link_area = -1;
   if (!current_map || !link_drawn_pos(&drawn))
     return;
   float P[3] = { drawn.x, drawn.y + PHYS_Y, drawn.z };
   float best = 0;
   for (int i = 0; i < n_walls; i++) {
-    if (!wall_shown(map_wall(i)))
+    bool area = is_void_area(map_wall(i)) && void_areas_shown();
+    if (!area && !wall_shown(map_wall(i)))
       continue;
     float dx = P[0] - wall_geo[i].centre[0];
     float dy = P[1] - wall_geo[i].centre[1];
     float dz = P[2] - wall_geo[i].centre[2];
     if (dx * dx + dy * dy + dz * dz > wall_geo[i].radius * wall_geo[i].radius)
       continue;
-    int up;
+    int up = 0;
     float depth = depth_inside(i, P, &up);
+    if (area) {
+      if (depth > 0 || in_cylinder(i, P))
+        link_area = i;
+      continue;
+    }
     if (depth > best) {
       best = depth;
       link_wall = i;
@@ -362,9 +439,16 @@ static int n_dots[PUBLISH_BUFFERS];
 #define MAX_LINES 2048 /* more than overlayui.c draws */
 static aw_line_t lines[PUBLISH_BUFFERS][MAX_LINES];
 static int n_lines[PUBLISH_BUFFERS];
+#define AREA_MAX_FACES 160 /* the void areas' sides, after voidmap.c's faces */
+static aw_face_t faces[PUBLISH_BUFFERS][VOIDMAP_MAX_FACES + AREA_MAX_FACES];
+static int n_faces[PUBLISH_BUFFERS];
+static view_cam_t cams[PUBLISH_BUFFERS]; /* the camera a frame's lines and faces go with */
+static float void_ends[VOIDMAP_MAX_LINES][2][3]; /* voidmap_lines' for this frame, before they're projected */
+static uint8_t void_colours[VOIDMAP_MAX_LINES];
 static publish_t published = PUBLISH_INIT;
 static int taken = -1; /* the render thread's, from airwall_take to airwall_release */
-static int n_walls_near;
+static int n_near;           /* the walls and void areas within AW_RANGE this frame */
+static int n_air_walls_near; /* the air walls of them (airwall_summary) */
 
 /* 0..size to 0..65535, clamped */
 static uint16_t to_unit16(float v, float size)
@@ -439,9 +523,10 @@ static bool clip_to_picture(float *x0, float *y0, float *x1, float *y1, float *c
 }
 
 /* a point `ahead` metres in front of the camera, as deep as the scene must be nearer than for it to hide */
-static float line_depth(const view_cam_t *cam, float ahead)
+static float line_depth(const view_cam_t *cam, float ahead, bool scene)
 {
-  return view_depth(cam, ahead - DEPTH_MARGIN_M - DEPTH_MARGIN_SHARE * ahead);
+  float margin = scene ? SCENE_MARGIN_M + SCENE_MARGIN_SHARE * ahead : DEPTH_MARGIN_M + DEPTH_MARGIN_SHARE * ahead;
+  return view_depth(cam, ahead - margin);
 }
 
 /* A line on the picture: near level or upright, a staircase of long rectangles; otherwise dots. */
@@ -555,7 +640,7 @@ static void find_link_box(const view_cam_t *cam, link_box_t *box)
 }
 
 static void add_edge_dots(aw_dot_t *out, int *n, aw_line_t *line_out, int *n_line, const view_cam_t *cam,
-                          const float a[3], const float b[3], uint8_t color)
+                          const float a[3], const float b[3], uint8_t color, bool scene)
 {
   float va[3], vb[3];
   view_point(cam, a, va);
@@ -574,11 +659,11 @@ static void add_edge_dots(aw_dot_t *out, int *n, aw_line_t *line_out, int *n_lin
     return;
   if (line_out) {
     /* the depth is linear along the line on the picture (as 1 / distance is): the cut ends' from the ends' */
-    float da = line_depth(cam, va[2]), db = line_depth(cam, vb[2]);
+    float da = line_depth(cam, va[2], scene), db = line_depth(cam, vb[2], scene);
     if (*n_line < MAX_LINES)
       line_out[(*n_line)++] = (aw_line_t){ x0 / REF_WIDTH, y0 / REF_HEIGHT, x1 / REF_WIDTH, y1 / REF_HEIGHT,
                                            va[2] < vb[2] ? va[2] : vb[2], da + t0 * (db - da), da + t1 * (db - da),
-                                           color };
+                                           color, scene };
   } else if (*n < MAX_DOTS) {
     add_line(out, n, x0, y0, x1, y1, color);
   }
@@ -617,7 +702,7 @@ static int sort_near_walls(const view_cam_t *cam)
 {
   int count = 0;
   for (int i = 0; i < n_walls; i++) {
-    if (!wall_shown(map_wall(i)))
+    if (!wall_drawn(map_wall(i)))
       continue;
     float dx = wall_geo[i].centre[0] - cam->pos[0];
     float dy = wall_geo[i].centre[1] - cam->pos[1];
@@ -637,16 +722,61 @@ static int sort_near_walls(const view_cam_t *cam)
   return count;
 }
 
+static void add_face(aw_face_t *out, int *n, int max, const float corner[3], const float u_end[3],
+                     const float v_end[3], uint8_t color, bool scene)
+{
+  if (*n >= max)
+    return;
+  aw_face_t *face = &out[(*n)++];
+  for (int i = 0; i < 3; i++) {
+    face->corner[i] = corner[i];
+    face->u[i] = u_end[i] - corner[i];
+    face->v[i] = v_end[i] - corner[i];
+  }
+  face->color = color;
+  face->scene = scene;
+}
+
+/* Wall `index`'s sides as faces, from the points build_map_geometry made for it: a box's six, a cylinder's
+ * round side in its segments (not its ends). */
+static void add_wall_faces(int index, aw_face_t *out, int *n, int max, uint8_t color, bool scene)
+{
+  const airwall_t *wall = map_wall(index);
+  int point = wall_geo[index].first_point, end = point + wall_geo[index].n_points;
+  for (int k = 0; k < wall->n_shapes; k++) {
+    const airshape_t *shape = &data_airshapes[wall->first_shape + k];
+    int count = shape->type == SHAPE_BOX ? 8 : 2 * CYLINDER_SEGMENTS;
+    if (point + count > end) /* its points didn't all fit */
+      return;
+    if (shape->type == SHAPE_BOX) {
+      /* corner number: bit k picks the side on axis k. The two faces square to each axis */
+      for (int axis = 0; axis < 3; axis++)
+        for (int side = 0; side < 2; side++) {
+          int from = point + (side << axis);
+          add_face(out, n, max, points[from], points[from + (1 << (axis + 1) % 3)],
+                   points[from + (1 << (axis + 2) % 3)], color, scene);
+        }
+    } else {
+      for (int j = 0; j < CYLINDER_SEGMENTS; j++)
+        add_face(out, n, max, points[point + j], points[point + (j + 1) % CYLINDER_SEGMENTS],
+                 points[point + CYLINDER_SEGMENTS + j], color, scene);
+    }
+    point += count;
+  }
+}
+
 void airwall_frame(bool gpu)
 {
   frame_number++;
-  if (airwalls_shown)
+  if (airwalls_shown || void_areas_shown())
     check_now();
   int f = publish_next(&published), n = 0, nl = 0;
-  n_walls_near = 0;
+  n_faces[f] = 0;
+  n_near = 0;
+  n_air_walls_near = 0;
   link_boxes[f].ok = false;
-  bool walls = airwalls_shown && current_map;
-  bool draw = (walls || savepos_shown) && !game_is_paused();
+  bool walls = (airwalls_shown || void_areas_shown()) && current_map;
+  bool draw = (walls || savepos_shown || voidmap_shown) && !game_is_paused();
   view_cam_t cam;
   if (draw && view_camera(&cam)) {
     /* the save position's markers (savepos.c) first: a few lines the walls' budget never cuts */
@@ -654,15 +784,32 @@ void airwall_frame(bool gpu)
     static uint8_t mark_colours[SAVEPOS_MAX_LINES];
     int n_marks = savepos_lines(mark_ends, mark_colours, SAVEPOS_MAX_LINES);
     for (int i = 0; i < n_marks; i++)
-      add_edge_dots(dots[f], &n, gpu ? lines[f] : 0, &nl, &cam, mark_ends[i][0], mark_ends[i][1], mark_colours[i]);
+      add_edge_dots(dots[f], &n, gpu ? lines[f] : 0, &nl, &cam, mark_ends[i][0], mark_ends[i][1], mark_colours[i],
+                    false);
+    /* then where Link voids (voidmap.c), its nearest lines */
+    int n_void = voidmap_lines(void_ends, void_colours, VOIDMAP_MAX_LINES);
+    for (int i = 0; i < n_void; i++)
+      add_edge_dots(dots[f], &n, gpu ? lines[f] : 0, &nl, &cam, void_ends[i][0], void_ends[i][1], void_colours[i],
+                    !voidmap_xray);
+    if (gpu)
+      n_faces[f] = voidmap_faces(faces[f], VOIDMAP_MAX_FACES);
+    int max_faces = VOIDMAP_MAX_FACES + AREA_MAX_FACES;
+    cams[f] = cam;
     /* nearest wall first, so the budget goes to what's close */
-    n_walls_near = walls ? sort_near_walls(&cam) : 0;
-    for (int k = 0; k < n_walls_near && (gpu ? nl < MAX_LINES : n < MAX_DOTS); k++) {
+    n_near = walls ? sort_near_walls(&cam) : 0;
+    for (int k = 0; k < n_near; k++)
+      n_air_walls_near += !is_void_area(map_wall(near_order[k]));
+    for (int k = 0; k < n_near && (gpu ? nl < MAX_LINES : n < MAX_DOTS); k++) {
       int i = near_order[k];
       const airwall_t *wall = map_wall(i);
-      uint8_t color = i == link_wall ? AW_INSIDE : wall_colour(wall);
+      uint8_t color = i == link_wall || i == link_area ? AW_INSIDE : wall_colour(wall);
+      /* a void area is drawn as the other void shapes are: behind the scenery, its sides see-through */
+      bool area = is_void_area(wall), scene = area && !voidmap_xray;
       for (int e = wall_geo[i].first_edge; e < wall_geo[i].first_edge + wall_geo[i].n_edges; e++)
-        add_edge_dots(dots[f], &n, gpu ? lines[f] : 0, &nl, &cam, points[edges[e][0]], points[edges[e][1]], color);
+        add_edge_dots(dots[f], &n, gpu ? lines[f] : 0, &nl, &cam, points[edges[e][0]], points[edges[e][1]], color,
+                      scene);
+      if (area && gpu)
+        add_wall_faces(i, faces[f], &n_faces[f], max_faces, color, scene);
     }
     if (gpu && nl)
       find_link_box(&cam, &link_boxes[f]);
@@ -695,6 +842,25 @@ bool airwall_link_box(float rect[4], float front[3], float back[3], float ground
   return true;
 }
 
+const aw_face_t *airwall_faces(int *n, const view_cam_t **cam)
+{
+  *n = taken < 0 ? 0 : n_faces[taken];
+  *cam = taken < 0 ? 0 : &cams[taken];
+  return taken < 0 ? 0 : faces[taken];
+}
+
+bool airwall_needs_depth(void)
+{
+  if (taken < 0)
+    return false;
+  if (n_faces[taken])
+    return true;
+  for (int i = 0; i < n_lines[taken]; i++)
+    if (lines[taken][i].scene)
+      return true;
+  return false;
+}
+
 const aw_dot_t *airwall_published(int *n)
 {
   *n = taken < 0 ? 0 : n_dots[taken];
@@ -713,5 +879,5 @@ void airwall_summary(char *buf, int len)
   if (!current_map)
     snprintf(buf, len, TF("no air walls in this map"));
   else
-    snprintf(buf, len, "%d walls here, %d within %.0f", n_walls, n_walls_near, (double)AW_RANGE);
+    snprintf(buf, len, "%d walls here, %d within %.0f", n_air_walls, n_air_walls_near, (double)AW_RANGE);
 }

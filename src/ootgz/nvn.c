@@ -1361,6 +1361,10 @@ static const float airwall_colours[AW_NCOLORS][4] = {
   [AW_SLOT_A] = { 1.0f, 0.40f, 0.85f, 1.0f }, /* pink: save slot A (savepos.c) */
   [AW_SLOT_B] = { 0.35f, 1.0f, 0.45f, 1.0f }, /* green: save slot B */
   [AW_LOAD] = { 1.0f, 0.95f, 0.30f, 1.0f },   /* yellow: where a load puts Link */
+  [AW_VOID_GROUND] = { 0.92f, 0.96f, 1.0f, 1.0f },  /* white: the edge of the mapped ground (voidmap.c) */
+  [AW_VOID_DEADLY] = { 1.0f, 0.14f, 0.12f, 1.0f },  /* red: a deadly cell, or the ring once Link is past it */
+  [AW_VOID_RING] = { 1.0f, 0.54f, 0.10f, 1.0f },    /* orange: the ring Link has to stay in off the map */
+  [AW_VOID_AREA] = { 0.70f, 0.34f, 1.0f, 1.0f },    /* purple: an area that voids Link inside it */
 };
 
 /* enemy health (enemyhp.c) */
@@ -1860,10 +1864,12 @@ static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index)
     int depth_w = 0, depth_h = 0;
     gpu_occluder_t link = { 0 }; /* only Link hides them */
     float box[4];
-    if (n_lines && !airwalls_xray && airwall_link_box(box, link.front, link.back, link.ground)) {
+    /* (no box, or the walls shown through Link: an empty one, and nothing of the depth is left as Link's) */
+    bool behind_link = !airwalls_xray && airwall_link_box(box, link.front, link.back, link.ground);
+    if (behind_link)
       link.x0 = box[0], link.y0 = box[1], link.x1 = box[2], link.y1 = box[3];
+    if (n_lines && (behind_link || airwall_needs_depth()))
       depth = scenedepth_lines(frame.area.w, frame.area.h, &depth_w, &depth_h, &prime_depth);
-    }
     if (!gpuui_depth(depth, depth_w, depth_h, prime_depth, &link))
       scenedepth_lines_give_up();
   }
