@@ -65,6 +65,22 @@ static const struct z64hd_build z64hd_builds[] = {
     /* made at 0xCCE6B0 (0x490 bytes; constructor 0xCCE730: a mutex at +0x00, +0x28 / +0x40 zeroed, the
      * actor tree's root at +0x38 null), as v131072's; the actors' life and position fields are the same */
     .actor_mgr_ptr = 0x4E20930,
+    /* v131072's cct functions matched by masked signature (identical code but for ADRP/BL) and confirmed
+     * by their callers: ForceNoHit's executor (0x290CD80) calls 0x1A9C00, the gravity reducer (0x2738FE0)
+     * calls 0x1ED800. The property vtable is the one with SetPosition at +0xE8 and 0x6D74E0 at +0x250;
+     * the body vtable is v131072's entries mapped over, 0x8B8 before it as in v131072. The controller
+     * chain, IsOnGround (0x2A59600) and the fall-history fields cct.c writes are at the same offsets. */
+    .vt_cct_property = 0x4BCF308,
+    .vt_cct_body = 0x4BCEA50,
+    /* the ragdoll bones' bodies (logged in game); 0x3268 after vt_cct_body in both builds */
+    .vt_rigid_body = 0x4BD1CB8,
+    .cct_force_no_hit = 0x1A9C00,
+    .cct_set_position = 0x6D7730,
+    .cct_set_velocity = 0x1ED800,
+    /* v131072's 0x5F88C0, found through ExecuteEventPlayerImmediateRagdollDown's enter (identical in both);
+     * the holder chain, the hit component and level, the controller's reaction / state and the player's
+     * fields that ragdoll.c reads are at the same offsets as v131072's */
+    .ragdoll_controller = 0x587460,
     .link_paths = {
       { 0x4DC7210, 0x480 }, { 0x4E243F8, 0x2E0 }, { 0x4E23158, 0xEF8 },
       { 0x4E24400, 0x328 },
@@ -120,6 +136,7 @@ static const struct z64hd_build z64hd_builds[] = {
     .vt_life = 0x4B4C460,
     .vt_cct_property = 0x4C34F10,
     .vt_cct_body = 0x4C34658,
+    .vt_rigid_body = 0x4C378C0,
     .cct_force_no_hit = 0x158D40,
     .cct_set_position = 0x6B2530,
     .cct_set_velocity = 0x12DBE0,
@@ -129,6 +146,7 @@ static const struct z64hd_build z64hd_builds[] = {
     .voxel_mgr_ptr = 0x4C7DF00,
     .voxel_formats = 0x3EE8840,
     .event_state_ptr = 0x4E94840,
+    .ragdoll_controller = 0x5F88C0,
     .link_paths = {
       { 0x4E371D0, 0x480 }, { 0x4E94858, 0x2E0 }, { 0x4E935B8, 0xEF8 },
       { 0x4E94860, 0x328 }, { 0x4E94368, 0xD70 },

@@ -79,6 +79,7 @@ struct z64hd_build {
   /* Link's character controller (cct.c; FINDINGS "Native collision bypass"); 0: not known for this build */
   uint32_t vt_cct_property;
   uint32_t vt_cct_body;
+  uint32_t vt_rigid_body;     /* a ragdoll bone's body: a sibling of the controller body (same base fields) */
   uint32_t cct_force_no_hit;  /* void (body, bool): queued, preserves filter state */
   uint32_t cct_set_position;  /* void (property, const vec3f_t *): updates attached bodies */
   uint32_t cct_set_velocity;  /* void (body, const vec3f_t *): queues linear velocity */
@@ -96,6 +97,8 @@ struct z64hd_build {
   /* [main+this]: the event state the restart point update checks (+0x68: an event is running, FINDINGS 9.7);
    * 0: not known for this build */
   uint32_t event_state_ptr;
+  /* Link's ragdoll (ragdoll.c, FINDINGS 9.9); 0: not known for this build */
+  uint32_t ragdoll_controller;   /* controller (object): Link's ragdoll controller, NULL if he has none */
   struct z64hd_link_path link_paths[5];
 };
 
@@ -107,6 +110,7 @@ extern uintptr_t z64hd_main;
 /* the character controller's, for the running build (0 where it isn't known) */
 #define Z64HD_VT_CCT_PROPERTY  (z64hd_game->vt_cct_property)
 #define Z64HD_VT_CCT_BODY      (z64hd_game->vt_cct_body)
+#define Z64HD_VT_RIGID_BODY    (z64hd_game->vt_rigid_body)
 #define Z64HD_CCT_FORCE_NO_HIT (z64hd_game->cct_force_no_hit)
 #define Z64HD_CCT_SET_POSITION (z64hd_game->cct_set_position)
 #define Z64HD_CCT_SET_VELOCITY (z64hd_game->cct_set_velocity)

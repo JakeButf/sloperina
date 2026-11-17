@@ -21,6 +21,7 @@
 #include "position.h"
 #include "savepos.h"
 #include "voidmap.h"
+#include "ragdoll.h"
 #include "link.h"
 #include "menu.h"
 #include "input.h"
@@ -179,6 +180,8 @@ static void set_lock_axis(lock_axis_t axis, bool on)
 static void set_lock_x(menu_item_t *it, bool on) { set_lock_axis(LOCK_X, on); }
 static void set_lock_y(menu_item_t *it, bool on) { set_lock_axis(LOCK_Y, on); }
 static void set_lock_z(menu_item_t *it, bool on) { set_lock_axis(LOCK_Z, on); }
+static bool get_ragdoll(menu_item_t *it) { return ragdoll_active(); }
+static void set_ragdoll(menu_item_t *it, bool on) { ragdoll_set(on); }
 
 #define QUARTERS_PER_HEART 4
 #define F_MAX_HEARTS 0xFBE01DA1u /* quarter hearts (game.py INT_HASH) */
@@ -402,7 +405,7 @@ static void act_load_position(menu_item_t *it)
 
 static void build_link(void)
 {
-  menu_init(&m_link, "link", 19);
+  menu_init(&m_link, "link", 20);
   /* what can be changed first */
   menu_item_t *health = menu_add_number(&m_link, "health", get_health, set_health, max_health, fill_health, 0);
   if (health) {
@@ -435,6 +438,9 @@ static void build_link(void)
   menu_item_t *lock_z = menu_add_check(&m_link, "lock Z", get_lock_z, set_lock_z, 0);
   if (lock_z)
     lock_z->hint = "Hold Link's Z (map East/West) where he is; off after a map change";
+  menu_item_t *ragdoll = menu_add_check(&m_link, "ragdoll (R3)", get_ragdoll, set_ragdoll, 0);
+  if (ragdoll)
+    ragdoll->hint = "knock Link over, as a bomb does; he gets up by himself";
   menu_add_return(&m_link);
   /* what can only be read, under return after a blank line */
   add_blank_line(&m_link);

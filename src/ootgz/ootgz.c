@@ -39,6 +39,7 @@
 #include "ootgz_version.h"
 #include "pouch.h"
 #include "savepos.h"
+#include "ragdoll.h"
 #include "position.h"
 #include "lock.h"
 #include "sys.h"
@@ -395,6 +396,7 @@ static void frame(void)
   watches_frame(menu_current != 0);
   levitate_frame(menu_current != 0);
   savepos_frame();
+  ragdoll_frame(menu_current != 0);
   position_frame(menu_current != 0);
   divetest_frame(menu_current != 0);
   lock_frame();

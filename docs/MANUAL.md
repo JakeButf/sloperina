@@ -74,6 +74,7 @@ With the menu closed:
 | **L3** | Levitate on / off (if enabled, [2.10.2](#2102-levitate)) |
 | **X / B** held | Levitate up / down; release to hover |
 | **R3** held | Levitate: hold height even if X/B is held |
+| **R3** | Ragdoll (as a bomb hit) when not levitating |
 | **L** or **R** (your choice) | Frame advance (if enabled, [2.10.3](#2103-frame-advance)) |
 
 ## 2 Menus
@@ -90,6 +91,7 @@ With the menu closed:
 
 | **save position (R + d-up)** | Remembers where Link is, which way he faces and the map (gz's save position). The first save in an area only finds Link's position in memory ("Locating Link's starting position, please try again"; he's lifted a little while it's tested, as with levitate, and it's quicker while he's moving): press it again once it says it's found him. |
 | **load position (R + d-down)** | Puts Link back there, facing the same way. Only in the same map. With nothing saved: "No position saved yet". |
+| **ragdoll (R3)** | Knocks Link over and tumbles him backwards: the game's own reaction to a bomb, so he can't attack and doesn't sink while it lasts. He gets up by himself and it unticks then; it can't be cut short. When the game wouldn't take a hit (a map's arrival, an event) it says so and does nothing. On 1.1.1 the game caps the tumble's speed; 1.0 has no cap. |
 
 Under **return**: Link's **position** (x, y, z), his **current age** and the **map**.
 
