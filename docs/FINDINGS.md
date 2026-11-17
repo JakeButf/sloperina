@@ -991,6 +991,27 @@ point.
   - on a body: P`+0x1C34 & 0xC8`, P`+0x13D0 & 0x1182800`, P`+0x2C` bit 19, or the P`+0x15D4` timer > 0;
   - hard-coded boxes in WaterTemple and CrumblingGanonCastle;
   - deep water (water info `+0x78` depth, `+0x38` surface y, compared with Link's y).
+  - P`+0x13D0 & 0x1182800` (with P`+0x1C34 & 0xC8` and P`+0x2C` bit 19). P`+0x13D0` is Link's ground flags,
+    cleared and rebuilt every frame by `main+0x5F90A0`:
+    - bit 11: outside |x| ≤ 5000, -3000 ≤ y ≤ 5000, |z| ≤ 4000.
+    - bit 24 (`main+0x5FA87C`): **off valid ground**. A sensor component (`[actor+0x270]+0x460`, filled by
+      `main+0x38AEF0` from grid lookups round Link's rounded position) has two probes:
+      - `+0x37C` bit 0 hit, `+0x510` distance;
+      - `+0xBBC` bit 0 hit, `+0x115C` distance.
+
+      Bit 24 is set when the first hits 5 m or more away (or with no distance), or misses while the second hits
+      (and then bit 25 too when that one is 8 m or more away). On map floor both hit close by. On out-of-bounds
+      floor only the second hits, so the point stops following Link there. Out-of-bounds floor near valid
+      ground (within 5 m) is expected to keep it following (not tested).
+    - bit 20 (`main+0x5FB84C`), the same step's other branch: the first probe hits close by, but the cell's
+      attribute 8 (`[S+0x108]` vfunc `+0xB0`, arg 8, returns value and valid bytes) is set, or vfunc `+0xB8`
+      gives 1 or less. Seen holding the point out of bounds as young Link, where bit 24 wasn't set.
+    - The bit-24 step is skipped while an event runs (`[[main+0x4E94840]+0x68]` ≠ 0, the same check as the update's),
+      if `[actor+0x270]+0x460` `+0xA8` bit 1 is clear, or if P`+0x1C54` bit 0 is set.
+    - **Putting the ocarina away** is an event. In the frame it ends, the flags are rebuilt while it's still running
+      (no bit 24) and the update runs after it has ended, so the point jumps to Link once. The mod only shows where
+      bit 24 or 20 holds the point (`savepos.c`, an orange mark); it doesn't move the point. Clearing the bit from the
+      mod's frame does nothing: the mod runs outside the window between the rebuild and the update.
 
   On map collision the point becomes the actor's position (`actor+0x31C`), stored at P`+0x18A4` with yaw P`+0x18C4`,
   and P`+0x18B0` = 1 (ready; P`+0x30` bit 11 is set too). On a body (a moving block, a platform) `main+0x2E7FE80`

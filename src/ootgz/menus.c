@@ -2341,14 +2341,19 @@ static void build_voids(void)
   m_voids.footer = 1;
 }
 
+static void text_savepos_here(menu_item_t *it, char *buf, int len)
+{
+  savepos_here_text(buf, len);
+}
+
 static menu_t m_savepos;
 
 static void build_savepos(void)
 {
-  menu_init(&m_savepos, "save position", 7);
+  menu_init(&m_savepos, "save position", 8);
   menu_item_t *show = menu_add_check(&m_savepos, "show slots", get_savepos_shown, set_savepos_shown, 0);
   if (show) {
-    show->hint = "pink: slot a  green: slot b  cross: the one a save keeps";
+    show->hint = "pink: slot a  green: slot b  cross: the one a save keeps  orange: where the ocarina would move b";
     show->log_label = "save slots:";
   }
   menu_item_t *load = menu_add_check(&m_savepos, "where a load puts link", get_savepos_load, set_savepos_load, 0);
@@ -2362,7 +2367,8 @@ static void build_savepos(void)
   menu_add_text(&m_savepos, text_savepos_slot, SAVEPOS_A);
   menu_add_text(&m_savepos, text_savepos_slot, SAVEPOS_B);
   menu_add_text(&m_savepos, text_savepos_load, 0);
-  m_savepos.footer = 3;
+  menu_add_text(&m_savepos, text_savepos_here, 0);
+  m_savepos.footer = 4;
 }
 
 static void build_scene(void)

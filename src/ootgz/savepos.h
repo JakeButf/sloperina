@@ -9,6 +9,10 @@
 extern bool savepos_shown; /* draw the slots */
 extern bool savepos_load;  /* and where a load would put Link (the game's search round SavePos) */
 
+/* game thread, once a frame, read only: notes whether the game won't keep the restart point where Link stands
+ * (only his off-valid-ground flags, bits 24 and 20, hold it), for the marker and savepos_here_text */
+void savepos_frame(void);
+
 enum { SAVEPOS_A, SAVEPOS_B, SAVEPOS_SLOTS };
 
 typedef struct {
@@ -25,12 +29,14 @@ bool savepos_slots(savepos_slot_t slots[SAVEPOS_SLOTS]);
 bool savepos_link_state(char *buf, int len);
 
 /* game thread: the markers as world lines, (from, to) and a colour (airwall.h AW_SLOT_*); how many */
-#define SAVEPOS_MAX_LINES 64
+#define SAVEPOS_MAX_LINES 128
 int savepos_lines(float ends[][2][3], uint8_t colours[], int max);
 
 /* the menu's line for a slot: "a  -6.78  121.32  -17.84  yaw 90  *" (*: the one SavePos takes) or "a  not set" */
 void savepos_text(int slot, char *buf, int len);
 /* the menu's line for the load: "load  12.95  124.87  -34.31  moved 5.0" (or "stays", "not searched") */
 void savepos_load_text(char *buf, int len);
+/* the menu's line for where Link stands: "here  kept by the game" or "here  not kept: ..." (savepos_frame) */
+void savepos_here_text(char *buf, int len);
 
 #endif
