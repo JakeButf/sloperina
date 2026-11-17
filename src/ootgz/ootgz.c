@@ -392,7 +392,7 @@ static void frame(void)
   menus_research_frame();
   watches_frame(menu_current != 0);
   levitate_frame(menu_current != 0);
-  ragdoll_frame();
+  ragdoll_frame(menu_current != 0);
   position_frame(menu_current != 0);
   divetest_frame(menu_current != 0);
   lock_frame();

@@ -1242,6 +1242,11 @@ void levitate_frame(bool menu_open)
                          (floating ? BTN_RSTICK | BTN_X | BTN_B : 0);
 }
 
+bool levitate_floating(void)
+{
+  return floating;
+}
+
 const char *levitate_state(void)
 {
   switch (search_state) {

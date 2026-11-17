@@ -102,10 +102,22 @@ static void set_no_hit(uintptr_t body, bool enabled)
   MAIN_FN(void (*)(uintptr_t, bool), Z64HD_CCT_FORCE_NO_HIT)(body, enabled);
 }
 
-bool cct_reset_vertical_velocity(uintptr_t expected_actor)
+bool cct_velocity(uintptr_t expected_actor, vec3f_t *out)
 {
   controller_t current;
   if (!expected_actor || !resolve(&current) || current.actor != expected_actor)
+    return false;
+  vec3f_t v = *(volatile vec3f_t *)(current.body + 0xE0);
+  if (!(v.x > -10000 && v.x < 10000 && v.y > -10000 && v.y < 10000 && v.z > -10000 && v.z < 10000))
+    return false;
+  *out = v;
+  return true;
+}
+
+bool cct_set_vertical_velocity(uintptr_t expected_actor, float y)
+{
+  controller_t current;
+  if (!expected_actor || !resolve(&current) || current.actor != expected_actor || !(y > -10000 && y < 10000))
     return false;
   /* The game's vertical-gravity reducer reads this same applied velocity and
    * uses this setter (main+0x278AA90). The setter locks and queues the change;
@@ -113,9 +125,47 @@ bool cct_reset_vertical_velocity(uintptr_t expected_actor)
   vec3f_t v = *(volatile vec3f_t *)(current.body + 0xE0);
   if (!(v.x > -10000 && v.x < 10000 && v.z > -10000 && v.z < 10000))
     return false;
-  v.y = 0;
+  v.y = y;
   MAIN_FN(void (*)(uintptr_t, const vec3f_t *), Z64HD_CCT_SET_VELOCITY)(current.body, &v);
   return true;
+}
+
+/* Any body of this type (Link's controller body, a ragdoll bone's body): its velocity as the setter
+ * last left it, the queued one (pending +0x3C, valid while pending +0x100 bit 7) or else the applied one. */
+bool cct_body_velocity(uintptr_t body, vec3f_t *out)
+{
+  if (!writable(body, 0x320))
+    return false;
+  uintptr_t vt = sys_ptr(body);
+  if (vt != MAIN(Z64HD_VT_CCT_BODY) && !(Z64HD_VT_RIGID_BODY && vt == MAIN(Z64HD_VT_RIGID_BODY)))
+    return false;
+  uintptr_t pending = next(body, 0x60);
+  if (pending && !writable(pending, 0x108))
+    return false;
+  vec3f_t v = pending && (*(volatile uint64_t *)(pending + 0x100) & (1ull << 7)) ? *(volatile vec3f_t *)(pending + 0x3C)
+                                                                                 : *(volatile vec3f_t *)(body + 0xE0);
+  if (!(v.x > -10000 && v.x < 10000 && v.y > -10000 && v.y < 10000 && v.z > -10000 && v.z < 10000))
+    return false;
+  *out = v;
+  return true;
+}
+
+bool cct_body_add_vertical_velocity(uintptr_t body, float dy, vec3f_t *before)
+{
+  vec3f_t v;
+  if (!z64hd_game || !Z64HD_VT_CCT_BODY || !Z64HD_CCT_SET_VELOCITY || !(dy > -10000 && dy < 10000) ||
+      !cct_body_velocity(body, &v))
+    return false;
+  if (before)
+    *before = v;
+  v.y += dy;
+  MAIN_FN(void (*)(uintptr_t, const vec3f_t *), Z64HD_CCT_SET_VELOCITY)(body, &v);
+  return true;
+}
+
+bool cct_reset_vertical_velocity(uintptr_t expected_actor)
+{
+  return cct_set_vertical_velocity(expected_actor, 0);
 }
 
 bool cct_on_ground(uintptr_t expected_actor, bool *grounded)

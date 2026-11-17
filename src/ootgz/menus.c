@@ -437,9 +437,9 @@ static void build_link(void)
   menu_item_t *lock_z = menu_add_check(&m_link, "lock Z", get_lock_z, set_lock_z, 0);
   if (lock_z)
     lock_z->hint = "Hold Link's Z (map East/West) where he is; off after a map change";
-  menu_item_t *ragdoll = menu_add_check(&m_link, "ragdoll", get_ragdoll, set_ragdoll, 0);
+  menu_item_t *ragdoll = menu_add_check(&m_link, "ragdoll (R3)", get_ragdoll, set_ragdoll, 0);
   if (ragdoll)
-    ragdoll->hint = "knock Link down limp, as the game's events do; untick to let him get up";
+    ragdoll->hint = "knock Link over, as a bomb does; he gets up by himself";
   menu_add_return(&m_link);
   /* what can only be read, under return after a blank line */
   add_blank_line(&m_link);

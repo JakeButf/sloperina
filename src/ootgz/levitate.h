@@ -14,6 +14,7 @@ extern int levitate_move_speed;   /* left stick, units per second */
 
 void levitate_frame(bool menu_open);
 const char *levitate_state(void); /* for watches/menus */
+bool levitate_floating(void);     /* L3 has him floating (R3 then holds height) */
 
 /* Link's physics record (where his position really lives), found and kept here; save / load position
  * (position.c) moves him through it too. Positions are drawn ones (the record sits 0.585 above). */
