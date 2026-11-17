@@ -156,6 +156,23 @@ Bools by setting:
 - Event scripts `Event/EventFlow/*.bfevfl` (format v0.4) decode with the `evfl` Python package;
   `tools/evdump.py` lists what each flow sets and checks. **This is the fastest way to learn how the game itself
   does something** (e.g. which node and parameters a cutscene uses to give an item).
+- **Dialogue and flags in event scripts** (1.1.1; read for the flag log, `tools/flaglog.py`): 914 `.bfevfl` files in
+  `Event/EventFlow/`, 653 of them with a flowchart. A spoken line is an `EventTalk` action with
+  `MessageId: EventFlowMsg/<file>:<label>` (10,158 of them); its speaker is the action's actor, and
+  `Npc_EventStarter` is the NPC Link talked to. Flags are set by `GameDataActor` actions with a `GameDataName`:
+  mostly `EventTriggerSetGameDataBool` (3,058), then `…SetGameDataInt`, `…AddOrSubGameDataInt`, `…CopyGameDataInt`
+  and others, 1,902 different fields in all. Quest stages are moved by challenge steps instead:
+  `ChallengeSystemActor.EventExecuteProgressChallengeStep` (287) with `ChallengeName: X, StepName: Y` sets
+  `Step_X` to `Y`. 257 of them name a story menu quest and one of its stages (`SageOfWater` / `Step04`, set by
+  `SageOfWater` › `IceCavern_WaterSerenade`); the rest are minigames and the like. There are also 39
+  `EventExecuteRollbackChallengeStep`. Only 21 of the field writes are `HavePlayedEvent.<event>`, so the game sets
+  the rest itself when an event plays. Of the 2,261 `HavePlayedEvent` names, 860 are a script or entry point name, and 883 more start with a script's name
+  (`Npc_Kokiri_Mido_Adult_C1_N`).
+- **Messages:** `Mals/<lang>.Product.110.sarc.zs` (`EUen`, `USen`, ...), a SARC of MSBT files (`EventFlowMsg/`,
+  `LayoutMsg/`, `ChallengeMsg/`, ...). The text is **UTF-8** (header byte 0x0C = 0), not the usual UTF-16. A
+  control tag is `0x0E`, u16 group, u16 type, u16 size, then its parameters. Seen: (0,4) a page break, (0,2)/(0,3)
+  size and colour, (2,n) a game value (a u16 length, then the GameData name, e.g. `SimpleShop_Price`), (4,0) an
+  emotion (`Angry`), (5,n) pauses, (201,n) item-name forms. Link's name is plain text.
 - **Pause screen layout:** `romfs/UI/Pouch/PouchTable/PouchTable.game__ui__PouchTable.bgyml` (BYML) lists every
   slot of the item, equipment and collection screens with its pouch items: `ItemArray` (item screen, `Pa_ItemIcon_00`
   onward: sticks, slingshot, boomerang, nuts, bombs, bombchus, hammer, hookshot/longshot, bow, fire/ice/light arrows,
@@ -577,6 +594,17 @@ Objects:
   its intended address. The module files compile for aarch64.
 - **Not verified:** `1.0.0` has no store offsets, so locks there only show a notice that it will not work.
 
+### 5.22 Loading zones don't fire while Link's collision is off
+- **Symptom:** floating into a loading zone with levitate's **through walls** on did nothing; the exit fired as
+  soon as levitate was turned off (log: collision bypass off, then `exit taken to GanonCastle` 0.8 s later).
+- **Cause:** the bypass is the game's ForceNoHit mode on Link's controller bodies (cct.c), which also stops the
+  zone's trigger (an `Area` actor's rigid body sensor) from seeing him.
+- **Fix:** `tools/exits.py` builds `data/exits.json` from the map layouts: an `AiGroups` entry whose `Logic` is
+  `FieldDungeonEntranceSet` references the exit (`FieldAndDungeonEntranceEventRequestActor`, destination in
+  `NextBancParamName{Child,Adult}`) and its `Area`, a unit box (-0.5..0.5 across, 0..1 up) placed like an air wall
+  (151 zones in 49 maps, all boxes). levitate.c ends levitation (and walk through walls hands collision back) while
+  Link's middle is within 0.5 of one, and refuses L3 there. Doors entered with A aren't in this list.
+
 ## 6. Things that do not work
 
 - **Using character 0x7F for an icon:** menu, log, splash, and input panels already use it as an
@@ -728,8 +756,6 @@ Each of these was tried and verified not to help:
 - Unticking an ocarina leaves `ActionGuide_IsEnd.Navi` set (the D-pad stays, empty).
 - Collision view (gz's): shelved. The collision files are decoded (`tools/phive.py`); the plan, costs and format
   are in [COLLISION.md](COLLISION.md).
-- Frame advance freezes the picture while paused (MANUAL §7). The game's own pause is a request count in the pause
-  manager, and one type stops the world while the game keeps drawing (§9.1).
 - Leads in §9 not followed up yet: a player debug move state that may survive (levitate without searching for the
   physics record), the game's own debug line and triangle shaders (collision view, stage 2), and the scene's
   managers (a Link state name, the exit Link is nearest to, the map's collision, the explored room after a warp).
@@ -750,6 +776,16 @@ sloperinaGZ yet. Same build as everything else here.
   at 1 run `SeqOneShotRequestPause` with `PauseType` `GamePause`, back at 0 `SeqOneShotReleasePause`, and below 0
   raise an app error ("[Seq]GamePause underflow, please report"). Callers: `GamePauseOn`/`Off`,
   `PlusMinusPauseOff`, `OcarinaPauseOn`/`Off`, `ShortCutPauseOn`/`Off`.
+- **The item wheel pauses exactly like the pause screen** (`ShortCutPauseOn` runs `ChangePreGamePause` and
+  `GamePauseOn`: the same values, at the same times). What tells them apart is an unnamed Enum, `0x578D41E1`
+  (values `None`, `ItemMenu`, `EquipmentMenu`, `CollectMenu`, `SystemMenu`, `Save`, `Load`, `Option`, `ActionGuide`,
+  `ToTitle`, `WorldMap`, `DungeonMap`, `FieldMap`, `UnopenMap`, `ChallengeMenu`, `ChallengeMenuFullScreen`,
+  `ImportantMenu`, `Ocarina`, `Title`, `Loading`, `GameOver`): the menu screen that's up. Logged in Lichii
+  (debug > pause research, 2026-11-15): the wheel left it `None`; Plus set `ItemMenu` and Minus `UnopenMap` one
+  frame after the pre request, back to `None` with the post request. The wheel's own fields (`UI_IsNeedOpenShortCut`,
+  `UI_IsShortCutBCancel`, `UI_CurrentShortCutCategory`, `Sequence_ShortCutOpenHoldCounter`) didn't change.
+  **hide in game menus** now also needs it to be other than `None` (`gd_game_menu_screen`); paused with it `None`
+  (the wheel), **hide over item wheel** decides instead.
 - **The pause manager** is `*[main+0x4e97e38]`: `+0x00` the number of pause types (20), `+0x08` the type table,
   sorted by ID, 0x20 bytes per type: `+0x00` name, `+0x08` ID (MurmurHash3 of the name), `+0x0C` and `+0x10`
   bitmasks (probably what the type stops), `+0x1C` the request count (bit 31 is a separate flag; keep it). `+0x48`

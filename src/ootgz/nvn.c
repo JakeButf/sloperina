@@ -152,15 +152,36 @@ static bool names_equal(const char *a, const char *b)
 }
 
 static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index);
+static void keep_clean_copy(nvn_queue_t *queue, int index);
+
+/* The game's presents (its render thread) and ours while frame advance holds it (the game's thread, see
+ * "presenting while held" below) draw with the same objects: one at a time. They never meet in practice:
+ * a hold starts after the game's last present, and the game presents nothing while held. */
+static int present_lock;
+static void lock_present(void)
+{
+  while (__atomic_exchange_n(&present_lock, 1, __ATOMIC_ACQUIRE))
+    sys_sleep_ns(0);
+}
+static void unlock_present(void) { __atomic_store_n(&present_lock, 0, __ATOMIC_RELEASE); }
+
+/* where the game presents (the same queue and window every frame): ours go there too */
+static nvn_queue_t *present_queue;
+static nvn_window_t *present_window;
 
 static void hook_present(nvn_queue_t *queue, nvn_window_t *window, int index)
 {
+  lock_present();
   gfx_presents++;
+  present_queue = queue;
+  present_window = window;
   scenedepth_present(real_getproc, device, queue);
+  keep_clean_copy(queue, index); /* the game's picture before ours goes on it */
   draw_overlay(queue, window, index);
   gfx_release();
   airwall_release();
   enemyhp_release();
+  unlock_present();
   real_present(queue, window, index);
 }
 
@@ -1969,4 +1990,176 @@ static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index)
     gfx_on_screen = true;
     log_printf("drawing on screen: scale %d/16 on %dx%d", frame.scale, tw, th);
   }
+}
+
+/* --- presenting while held -------------------------------------------------------------------------
+ * While frame advance holds the game in the frame hook, the game presents nothing (its render thread is
+ * idle: no acquires, submits or presents, measured on async_menu), so nothing drawn reaches the screen.
+ * So the game's thread presents frames of its own from the hold loop, the way the game does it:
+ *   nvnWindowAcquireTexture (with a sync) -> nvnQueueWaitSync on the present queue -> our work -> present
+ * (the game takes the next texture as NVN gives it and presents that one, so ours in between are no trouble).
+ * Our work: the game's last picture, kept before our panels went on it, copied in, then draw_overlay over it.
+ * The game's picture is kept (keep_clean_copy) only from the frame frame advance pauses on (it lets that
+ * frame through before holding), until it runs again.
+ * Memory: a whole picture is 14 MB at 2560x1440, more than the game's heap has, but the process had 100-120 MB of its memory unused in gameplay (debug > heap, "memory free"). So
+ * the picture lives in this module's own bss (CLEAN_MAX_BYTES), mapped by the loader at start, outside the
+ * game's heap. A larger picture (or a format of more than 4 bytes a pixel) isn't drawn on while paused. Without
+ * the functions, the hold presents nothing, as before. */
+#define CLEAN_MAX_BYTES (2560 * 1440 * 4)
+static _Alignas(PAGE_SIZE) uint8_t clean_storage[CLEAN_MAX_BYTES + PAGE_SIZE]; /* + a page of commands */
+
+static int (*window_acquire)(nvn_window_t *, nvn_obj_t *sync, int *index); /* 0: got one */
+static void (*queue_wait_sync)(nvn_queue_t *, const nvn_obj_t *sync);
+static enum { HELD_NONE, HELD_READY, HELD_FAILED } held_state;
+static nvn_obj_t acquire_sync, clean_sync, clean_cmd, clean_pool;
+static bool clean_sync_used;  /* a copy was submitted with clean_sync */
+static uint8_t *clean_mem;    /* clean_storage once its pool is made: the picture, then a page of commands */
+static size_t clean_size;     /* the picture's bytes */
+static int clean_w, clean_h;
+static volatile bool clean_wanted; /* frame advance is paused: keep the game's picture */
+static bool clean_valid;           /* clean_mem holds one */
+static _Alignas(16) uint8_t clean_control[CTRL_SIZE];
+volatile uint32_t nvn_held_presents;
+
+static void held_fail(const char *why)
+{
+  log_printf("frame advance: no drawing while paused: %s", why);
+  held_state = HELD_FAILED;
+}
+
+/* the objects that outlive the buffer: once */
+static bool held_init(void)
+{
+  if (held_state != HELD_NONE)
+    return held_state == HELD_READY;
+  window_acquire = (int (*)(nvn_window_t *, nvn_obj_t *, int *))real_getproc(device, "nvnWindowAcquireTexture");
+  queue_wait_sync = (void (*)(nvn_queue_t *, const nvn_obj_t *))real_getproc(device, "nvnQueueWaitSync");
+  if (!window_acquire || !queue_wait_sync) {
+    held_fail("NVN has no nvnWindowAcquireTexture / nvnQueueWaitSync");
+    return false;
+  }
+  if (!fn.sync_init(&acquire_sync, device) || !fn.sync_init(&clean_sync, device) ||
+      !fn.cmd_init(&clean_cmd, device)) {
+    held_fail("sync or command buffer");
+    return false;
+  }
+  held_state = HELD_READY;
+  return true;
+}
+
+/* waits for the GPU to be done with clean_mem (its last copy in or out); false: it isn't (yet) */
+static bool clean_idle(uint64_t timeout_ns)
+{
+  return !clean_sync_used || fn.sync_wait(&clean_sync, timeout_ns) < SYNC_TIMEOUT_EXPIRED;
+}
+
+/* The pool over clean_storage, the first time it's needed; kept from then on (the bss is ours either way).
+ * The swapchain's size is read again at each pause: a later, smaller one still fits. */
+static bool clean_ready(void)
+{
+  if (overlay_state != OV_READY || !swapchain_texture_count || !held_init())
+    return false;
+  nvn_texture_t *first = swapchain_textures[0];
+  int w = fn.tex_width(first), h = fn.tex_height(first);
+  size_t size = round_page((size_t)w * h * bytes_per_pixel);
+  if (size > CLEAN_MAX_BYTES) {
+    static bool warned;
+    if (!warned)
+      log_printf("frame advance: a %dx%d picture (%u KiB) is more than the %u KiB kept for it: not drawn while paused",
+                 w, h, (unsigned)(size / 1024), (unsigned)(CLEAN_MAX_BYTES / 1024));
+    warned = true;
+    return false;
+  }
+  if (!clean_mem) {
+    if (!make_pool(&clean_pool, clean_storage, sizeof(clean_storage), POOL_CPU_UNCACHED | POOL_GPU_CACHED)) {
+      held_fail("memory pool");
+      return false;
+    }
+    clean_mem = clean_storage;
+    clean_sync_used = false;
+  }
+  clean_w = w;
+  clean_h = h;
+  clean_size = CLEAN_MAX_BYTES; /* the command page stays at the end, whatever the picture's size */
+  return true;
+}
+
+void nvn_freeze(bool paused)
+{
+  static bool frozen; /* what was asked last: a pause whose memory couldn't be had isn't asked again */
+  if (paused == frozen)
+    return;
+  frozen = paused;
+  if (held_state == HELD_FAILED)
+    return;
+  lock_present();
+  clean_valid = false;
+  clean_wanted = paused && clean_ready();
+  unlock_present();
+}
+
+/* Records one copy between the picture and texture `tex` (out: texture -> buffer) and submits it on `queue`. */
+static void clean_copy(nvn_queue_t *queue, nvn_texture_t *tex, bool out)
+{
+  nvn_addr_t addr = fn.pool_address(&clean_pool);
+  nvn_region_t whole = { 0, 0, 0, clean_w, clean_h, 1 };
+  fn.cmd_add_command(&clean_cmd, &clean_pool, (ptrdiff_t)clean_size, PAGE_SIZE);
+  fn.cmd_add_control(&clean_cmd, clean_control, sizeof(clean_control));
+  fn.cmd_begin(&clean_cmd);
+  if (out)
+    fn.cmd_copy_to_buffer(&clean_cmd, tex, 0, &whole, addr, 0);
+  else
+    fn.cmd_copy_to_texture(&clean_cmd, addr, tex, 0, &whole, 0);
+  nvn_handle_t handle = fn.cmd_end(&clean_cmd);
+  fn.queue_submit(queue, 1, &handle);
+  fn.queue_fence(queue, &clean_sync, SYNC_ALL_GPU_COMMANDS_COMPLETE, 0);
+  clean_sync_used = true;
+}
+
+/* hook_present (locked): keep the game's picture, before draw_overlay puts ours on it */
+static void keep_clean_copy(nvn_queue_t *queue, int index)
+{
+  if (!clean_wanted || !clean_mem || index < 0 || index >= swapchain_texture_count)
+    return;
+  nvn_texture_t *tex = swapchain_textures[index];
+  clean_valid = false;
+  if (fn.tex_width(tex) != clean_w || fn.tex_height(tex) != clean_h || fn.tex_format(tex) != swapchain_format)
+    return; /* the window changed size: not drawn while this pause lasts */
+  if (!clean_idle(SLOT_WAIT_NS))
+    return;
+  clean_copy(queue, tex, true);
+  clean_valid = true;
+}
+
+bool nvn_present_held(void)
+{
+  if (!clean_valid)
+    return false;
+  lock_present();
+  nvn_queue_t *queue = present_queue;
+  nvn_window_t *window = present_window;
+  if (!clean_valid || !queue || !window || !clean_idle(SLOT_WAIT_NS)) {
+    unlock_present();
+    return false;
+  }
+  int index = -1;
+  if (window_acquire(window, &acquire_sync, &index) != 0) {
+    unlock_present();
+    return false;
+  }
+  /* taken: from here it's always presented, or the game would find one texture fewer */
+  queue_wait_sync(queue, &acquire_sync);
+  if (index >= 0 && index < swapchain_texture_count) {
+    nvn_texture_t *tex = swapchain_textures[index];
+    if (fn.tex_width(tex) == clean_w && fn.tex_height(tex) == clean_h)
+      clean_copy(queue, tex, false);
+    draw_overlay(queue, window, index);
+    gfx_release();
+    airwall_release();
+    enemyhp_release();
+  }
+  unlock_present();
+  real_present(queue, window, index);
+  nvn_held_presents++;
+  return true;
 }

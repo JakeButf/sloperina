@@ -64,7 +64,6 @@ bool airwalls_push = true, airwalls_block = true;
 #define WALL_KIND_OTHER 1  /* doesn't touch him on foot */
 #define WALL_KIND_PUSHES 2 /* pushes him off */
 #define WALL_KIND_VOIDS 3  /* not a wall: an area that voids Link inside it (voidmap.h's to show) */
-#define SHAPE_BOX 0        /* any other shape type is a cylinder */
 #define CYLINDER_SEGMENTS 16
 #define CYLINDER_SIDE_EVERY 4 /* a side line at every 4th segment: four in all */
 #define TWO_PI 6.2831853f

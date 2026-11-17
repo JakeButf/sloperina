@@ -26,6 +26,8 @@
 #include "menus.h"
 #include "airwall.h"
 #include "enemyhp.h"
+#include "flaglog.h"
+#include "savebackup.h"
 #include "overlayui.h"
 #include "divetest.h"
 #include "levitate.h"
@@ -74,14 +76,18 @@ bool frame_advance = false;
 bool frame_advance_in_pause = false;
 bool pause_display = true;
 bool hide_in_game_menus = true;
+bool hide_over_item_wheel = false;
 int frame_advance_button; /* 0 L, 1 R */
 
 /* settings > hide in game menus: the game's own menus (Plus, Minus) are open, or opening (from the frame
- * they start to fade in). gfx_frame keeps the HUD shown while sloperinaGZ's menu is open (it can be moved
- * then). */
+ * after they start to fade in). settings > hide over item wheel: the item wheel, which pauses the same way
+ * but shows no menu screen (FINDINGS §9.1). gfx_frame keeps the HUD shown while sloperinaGZ's menu is open
+ * (it can be moved then). */
 static bool hud_hidden(void)
 {
-  return hide_in_game_menus && (gd_game_pausing() || gd_game_paused(0, 0));
+  if (!gd_game_pausing() && !gd_game_paused(0, 0))
+    return false;
+  return gd_game_menu_screen() ? hide_in_game_menus : hide_over_item_wheel;
 }
 
 /* Held (not as a shortcut) for FA_HOLD_MS, the button advances a frame every FA_REPEAT_MS
@@ -244,27 +250,31 @@ static void fa_release_buffered_input(void)
 static void fa_hold_game(void)
 {
   uint32_t presents_at_start = gfx_presents;
+  uint32_t held_at_start = nvn_held_presents;
   uint64_t paused_at = sys_tick();
   bool logged = false;
+  bool shown = false; /* our own presents are getting the menu and overlays onto the screen */
   /* the frame let through has been played: its buffered input is done with */
   input_force_active = false;
   buffered_buttons = 0;
   buffered_stick_moved[0] = false;
   buffered_stick_moved[1] = false;
-  /* The game presents nothing while it's held here (0 presents, measured), so what shows while
-   * paused is the last frame let through: it gets the pause icon (set before it's presented). */
+  /* The game presents nothing while it's held here (0 presents, measured), so we present the last frame
+   * let through ourselves (nvn_present_held), with the menu and overlays drawn afresh on it each time. If
+   * that can't be done (no memory for the picture), the last frame let through stays on screen as it was,
+   * with the pause icon (set before it was presented). */
   gfx_pause_icon = pause_display ? 1 : 0;
   for (;;) {
     sys_sleep_ns(FA_POLL_NS);
     sys_frame();
     input_update();
-    /* The button + L3 always runs again, even with the menu open: nothing is drawn while paused, so a
-     * menu opened here can't be seen, and it would take the button. Checked before the menu gets it. */
+    /* The button + L3 always runs again, even with the menu open (it would take the button), checked
+     * before the menu gets it. Without our presents a menu opened here can't be seen: it's closed. */
     uint32_t held = input_held();
     uint32_t pressed = input_pressed();
     uint32_t button = fa_button_bit();
     if ((held & button) && (held & BTN_LSTICK) && (pressed & (button | BTN_LSTICK))) {
-      if (menu_current)
+      if (menu_current && !shown)
         menu_close();
       fa_button_down = false;
       fa_repeating = false;
@@ -295,13 +305,15 @@ static void fa_hold_game(void)
     watches_frame(menu_current != 0);
     gfx_hud_hidden = hud_hidden();
     gfx_frame();
+    if (nvn_present_held())
+      shown = true;
     settings_frame(menu_current != 0);
     settings_log_frame();
-    /* does the picture still get presented? */
+    /* is the picture still presented, by the game or by us? */
     if (!logged && sys_tick() - paused_at > sys_tick_freq()) {
       logged = true;
-      log_printf("frame advance: %u presents in the first second paused",
-                 (unsigned)(gfx_presents - presents_at_start));
+      log_printf("frame advance: %u presents by the game, %u of ours in the first second paused",
+                 (unsigned)(gfx_presents - presents_at_start), (unsigned)(nvn_held_presents - held_at_start));
     }
   }
 }
@@ -313,6 +325,7 @@ static void fa_frame(void)
     fa_button_down = false;
     gfx_pause_icon = 0;
     input_force_active = false;
+    nvn_freeze(false);
     return;
   }
   if (!fa_paused && !frame_advance_in_pause && gd_game_paused(0, 0)) {
@@ -333,10 +346,14 @@ static void fa_frame(void)
     /* The game shows nothing new while it's held, so this frame is let through first, with the pause
      * icon on it: the screen shows the game is paused (and hasn't crashed). Held from the next one. */
     gfx_pause_icon = pause_display ? 1 : 0;
+    nvn_freeze(true); /* this frame's picture is kept as it's presented: drawn on while held */
     return;
   }
-  if (fa_paused)
+  if (fa_paused) {
     fa_hold_game();
+    if (!fa_paused)
+      nvn_freeze(false); /* running again: the picture's memory goes back */
+  }
 }
 
 /* --- frame hook -------------------------------------------------------------------------- */
@@ -360,6 +377,7 @@ static void frame(void)
   }
   frames_run++;
   sys_frame();
+  flaglog_frame(false); /* what the game changed since the last frame, before this module changes anything */
   input_update();
 
   fa_menu_was_open = menu_current != 0; /* an L that closes the menu isn't frame advance's */
@@ -389,6 +407,8 @@ static void frame(void)
   gameimage_frame(); /* the game's pictures (its controllers, its menus' parts), a little each frame */
   settings_frame(menu_current != 0);
   settings_log_frame();
+  flaglog_frame(true); /* what this frame's menu and cheats changed */
+  savebackup_frame();
   fa_frame(); /* last: the frame's work is done before the game is held */
 }
 
@@ -475,6 +495,11 @@ __attribute__((used)) void ootgz_module_init(void)
     log_raw(error);
   error = input_hook_game(z64hd_main);
   log_raw(error ? "input hook failed" : "input hook installed");
+  if (error)
+    log_raw(error);
+  /* nn::fs::CommitSaveData, for settings > back up saves */
+  error = savebackup_hook_game(z64hd_main);
+  log_raw(error ? "save hook failed" : "save hook installed");
   if (error)
     log_raw(error);
 }

@@ -310,16 +310,64 @@ Unreadable memory shows as `??`; read-only memory can't be changed. **Editing me
 
 The game's own pause state, for development: values you can watch, change and log.
 
+#### 2.9.4 Flag logging
+
+Records changes to the game's saved progress flags while you play, to learn what each flag is for. Every named story
+flag, event flag, item flag, counter and quest stage kept in the save is compared with the frame before. Flags
+without a known name are left out, and so is `Player_Rot_For_Map` (which way Link faces, for the map screen). The
+files go to `sloperinaGZ/flaglog/` on the SD card. There are three, each with its own switch:
+
+| Switch | File | What |
+|---|---|---|
+| **record flag changes** | `flags-NNN.csv` | Every flag change except player status. The newest one (the highest number) is added to, across sessions and save loads, with a `start` row for each session; `flags-001.csv` is made when there's none. To start a fresh file, rename or delete the old ones. |
+| **record player status** | `PlayerStatusChanges.csv` | `PlayerStatus.*`: health, magic, rupees, what Link wears, bottles. One file, added to each time, with a `start` row for each session. |
+| **record story events** | `StoryEvents.csv` | The story menu's values (the quests' stages) when the game changes them, with what most likely caused it. Your own changes from the story menu aren't recorded here. One file, added to each time. |
+
+The switches are kept in the settings, so they stay on across starts. The lines under the menu show each file and
+how many rows this session has added. While **record flag changes** is on, **Event flag written to CSV** shows in the bottom right
+when a flag changes, at most once a second ("3 event flags written to CSV" when more changed in that time). Each
+change is also kept in the log menu: choose **event flags** as its filter (2.11).
+
+Each row has the date and time (the console's clock, e.g. `13/11/2026 15:47:02`), the seconds since this session's recording
+started, the frame, the map, Link's position, what Link was doing (`EvtTalk` while he talks; 1.1.1 only), the
+flag's type, hash and name, its old and new values, and who changed it: `game`, or `sloperinaGZ` for the menu and
+cheats. Other kinds of row:
+- **`area`:** Link entered a map. It gives the old and new map, and in the note the entrance, the arrival event
+  and the event starter.
+- **`String`:** a change to one of the game's named text fields, such as the map.
+- **`bulk`:** loading a save changes thousands of flags at once, which shows as this one row.
+- **`muted`:** a flag that keeps changing (a timer, or a value a cheat holds) is muted after 10 quick changes.
+
+`StoryEvents.csv` adds, after those columns:
+
+| Column | What |
+|---|---|
+| `cause` | In words, e.g. `talking: Npc_Kokiri_Mido_Child (Npc_Kokiri_Mido_Child_C1_N)`, `event: …`, `entering HyruleField_Adult -> LakeHylia_Adult - arrival event …`, `after the event …`, or `unknown`. |
+| `event`, `event_ago` | The last event that played (a `HavePlayedEvent` or `HaveTalked_Special` flag going on) and how many seconds before. |
+| `npc` | That event's NPC, when it's an NPC's and played in the last minute. |
+| `last_area`, `area_ago`, `entrance`, `arrival_event` | The last map Link entered, how long before, the entrance and the event it played on arrival. |
+| `message_target` | The name the game's messages are using at that moment (`UI_MessageTargetActorName`). |
+
+On a PC with the game's files, `python tools/flaglog.py <file>.csv` writes `<file>-named.csv` for any of the three.
+It adds a cause from the game's event scripts (`cause_from_scripts` in the story file, where the recorder's own
+`cause` is kept), such as `talking: Npc_Kokiri_Mido_Child` or `getting <item>`. For changes made by event scripts it
+also adds the script (`set_by`, e.g. `SageOfWater/IceCavern_WaterSerenade` for the Water Temple quest moving to
+`Step04`), the NPC and the dialogue just before the change. The scripts say who *can* set a flag, so when several
+can, the `match` column says how sure the pick is; see the tool's help.
+
 ### 2.10 Settings
 
 **menu settings**: **language** ([6](#6-languages)), **size** (auto, small 2x, medium 2.5x, large 3x: the menu, watches
 and log), **background opacity** (0 to 100%, 100% at first; below 100% the game shows through, slightly behind) and
 **hide in game menus** (on at first): no watches, input display or log while the game's pause screen (Plus) or map
 (Minus) is open, so they don't cover it. They show again when it closes, and while this menu is open (to move them).
+They stay over the item wheel unless **hide over item wheel** is on.
+
+**hide over item wheel** (off at first): the same while the game's item wheel is up.
 
 **watch box header** (on at first): a small **watches** header over the watches box, underlined.
 
-**other settings**: the **input display**, **levitate** and **frame advance** menus below.
+**other settings**: the **input display**, **levitate**, **frame advance** and **save backups** menus below.
 
 #### 2.10.1 Input display
 
@@ -327,7 +375,7 @@ gz's input display, at the bottom left unless you move it (hidden while the menu
 
 | Item | What it does |
 |---|---|
-| **show** | Turn it on. |
+| **show** | Turn it on. The items below, up to **return**, are indented under it, as its options. |
 | **background** | Put it on a background, like the watches. |
 | **left stick**, **right stick**, **buttons** | What it shows. |
 | **style** | **row**: gz's line of stick values and buttons. **controller**: a Switch 2 Pro Controller with the buttons lighting up, rings for the sticks and their values underneath. **minimal**: a Pro Controller as one short line of outlines that fill while held. |
@@ -339,8 +387,8 @@ gz's input display, at the bottom left unless you move it (hidden while the menu
 
 | Item | What it does |
 |---|---|
-| **enabled** | **L3** toggles floating. Hold **X** to rise, **B** to descend; release both to hover. The left stick moves horizontally. X/B/R3 are hidden from the game while floating; L3 is reserved while enabled. |
-| **through walls** | Use the character controller's temporary collision bypass and position setter while floating. L3/off restores its previous collision mode. Held B commands descent through floors. |
+| **enabled** | **L3** toggles floating. Hold **X** to rise, **B** to descend; release both to hover. The left stick moves horizontally. X/B/R3 are hidden from the game while floating; L3 is reserved while enabled. Floating into a loading zone ends levitation there, so the zone takes Link as it would on foot (with **through walls** the game couldn't see him otherwise), and L3 can't start it again inside one or until the next map has loaded. **walk through walls** (cheats) also hands Link's collision back inside a loading zone. |
+| **through walls** | Use the character controller's temporary collision bypass and position setter while floating. L3/off restores its previous collision mode. Held B commands descent through floors. This and the two below are indented under **enabled**, as its options. |
 | **vertical speed** | X/B speed in units per second, replacing the old rise-speed label. Existing saved settings remain compatible; a saved **0** uses 4 units/s for manual movement. |
 | **move speed** | Horizontal speed in units per second. |
 
@@ -372,6 +420,23 @@ pause behavior have not been separately fixed.
 | **pause icon** | gz's pause icon at the top left while paused. |
 | **button** | **L** or **R**. The game doesn't see that button while frame advance is on. |
 
+#### 2.10.4 Save backups
+
+After a save the game makes, the whole save folder (every slot, and the options) can be copied to
+`sloperinaGZ/save-backups/<date>_<time>/` on the SD card, e.g. `2026-11-15_21-30-05` (year first, so they sort by
+date). The newest 100 are kept; older ones are deleted. Each is about 1 MB. In **settings > save backups**, under
+**save backup options**:
+
+| Item | What it does |
+|---|---|
+| **enabled** | Turns save backups on. Off by default. The two below are its options. |
+| **back up** | **autosaves** (the game's own, at loading zones and events), **hard saves** (from the save screen, or game over's save prompt) or **both** (the default). Changing only the options is never backed up. |
+| **location in folder name** | Off by default. Adds where the save was made, as the game's save screen names it, after the date: `2026-11-15_21-30-05 - Temple of Time`. |
+
+The line under **return** shows the last backup this session and its kind, or why there's none. A notice, **save
+backed up**, shows after each one. To restore one, copy its contents back over the game's save folder with the game
+closed (on an emulator: right-click the game > *Open save data location*).
+
 ### 2.11 Log
 
 Under **log history**: the last 128 messages sloperinaGZ wrote, newest first, five at a time. **↑** above them and
@@ -379,7 +444,11 @@ Under **log history**: the last 128 messages sloperinaGZ wrote, newest first, fi
 
 | Item | What it does |
 |---|---|
-| **filter** `< all >` | Which messages: **all**, only **problems** (anything that couldn't be done), or one kind (warp, settings, notice... whatever kinds there are). |
+| **filter** `< all >` | Which messages: **all**, only **problems** (anything that couldn't be done), **event flags**, or one kind (warp, settings, notice... whatever kinds there are). |
+
+**event flags** shows the flag changes recorded by flag logging (2.9.4), each with the date and time, e.g.
+`13/11 15:47:02 HavePlayedEvent.Npc_Kokiri_Mido_Child_C1C2_TT 0 -> 1`. It keeps the last 128 flag changes in a list of
+their own, so other messages don't push them out. Flags without a known name show their hash.
 
 Everything is also written to **`sloperinaGZ/log.txt`** on the SD card (on an emulator, its virtual SD card;
 Lichii build 150+: `%APPDATA%\lichii\sdmc\sloperinaGZ\log.txt`; Fritchii v5.8+: `%APPDATA%\fritchii\sdmc\sloperinaGZ\log.txt`; Eden and older Lichii / Fritchii: `%APPDATA%\eden\sdmc\sloperinaGZ\log.txt`), with the time since the game started, about once a
@@ -410,23 +479,24 @@ game's pause screen closed):
 - **Tap the button** (L or R): the game pauses (one more frame plays first, so the pause icon is on screen and
   you can see it hasn't crashed). Tap again: one frame. **Hold** it: after a moment, frames play
   one after another (about 15 a second) until you let go.
-- **Button + L3**: the game runs again. It always works, even with the menu open (the menu closes): nothing is
-  drawn while paused, so a menu opened then can't be seen. Press L3 first, then the button, so the menu doesn't
-  take the button press.
+- **Button + L3**: the game runs again. It always works, even with the menu open (the menu stays open). Press L3
+  first, then the button, so the menu doesn't take the button press.
 - A tap counts when you let go. You can hold or press anything else meanwhile (move the stick, hold A or Z...),
   as in gz: the frame you let through gets it. Only with **R** as the button, R + D-pad and R + right stick down
   stay shortcuts and don't advance.
 - **Buffered input**: everything you press while paused, and the last direction you push each stick, is given to
   the next frame, even if you've let go by then.
-- While paused the picture doesn't change (the game draws nothing), so the watches and input display update with
-  each frame you let through. The menu can still be opened and used while paused; its button works the menu then.
+- While paused the game draws nothing, so sloperinaGZ shows its last frame itself, about 60 times a second: the
+  menu, the watches, the input display and the log stay live over it. The menu can be opened and used while
+  paused; its button works the menu then. (If the game's picture is larger than 2560x1440, the last frame stays
+  on screen as it was and a menu opened while paused can't be seen; button + L3 then closes it.)
 
 ## 5 Settings file
 
 Settings are saved on the SD card in `sloperinaGZ/settings.ini` (on an emulator, its virtual SD card) a couple of
 seconds after you close the menu. It's plain `key=value` text: cheats, watches (which, in what order, their types,
 names and whether shown), the watches box, menu size, background, hiding in game menus, language, input display,
-levitate, frame advance, save position and void out. Delete it to go back to the defaults. Your game saves are never touched.
+levitate, frame advance, save position, flag logging and void out. Delete it to go back to the defaults. Your game saves are never touched.
 
 The game's pictures sloperinaGZ uses (the controllers in the input display, the menus' parts, the item icons)
 are kept in `sloperinaGZ/cache/` once they're made from your copy of the game, so later starts don't have to make
@@ -444,6 +514,5 @@ dropped (é shows as e) and other alphabets can't be shown yet.
 - Game versions **1.0.0** (base) and **1.1.1** (update v131072) are supported.
 - Collision shows the air walls; the full collision mesh isn't drawn yet.
 - Memory watches aren't kept between runs.
-- Frame advance freezes the picture while paused ([4](#4-about-frame-advance)).
 - Some changes only show after the game redraws them (pause screen, loading zone); story stages need a loading
   zone.

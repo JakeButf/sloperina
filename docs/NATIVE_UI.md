@@ -90,7 +90,8 @@ Read with [KillzXGaming/ShaderLibrary](https://github.com/KillzXGaming/ShaderLib
 
 ## Status
 
-**settings > style: the game's** (the default; `menu_style=0` in `settings.ini`, gz's pixel font is `1`).
+The game's style is the only one offered (`menu_style=0` in `settings.ini`). **settings > style** and gz's pixel
+font (`1`) were removed from the menu in 0.0.6.1: a saved `1` loads as the game's style.
 
 - `gamefile.c` reads `content:` files and decompresses `.zs` with the game's dictionaries (`zstd.c`: zstd's
   educational decoder, errors jump back instead of exiting; big files a block at a time through their window,

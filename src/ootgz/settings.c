@@ -5,8 +5,13 @@
  *   cheats=<bit per cheat_t>   watches_shown=0|1   watches_header=0|1   watch_position=<gfx_corner_t>
  *   watch_list=<watch_t>:<display type>:<hidden>,...
  *   opacity=0..100             arrival_cutscenes=0|1      levitate=0|1      levitate_speed=<units/s>
- *   menu_style=0|1 (0: the game's type, 1: gz's pixel font)
+ *   menu_style=0 (the game's type; gz's pixel font, 1, is no longer offered: a 1 is read as 0)
+ *   flag_log=0|1, flag_log_player_status=0|1, flag_log_story=0|1 (the flag log's three files, flaglog.h)
  *   hide_in_game_menus=0|1 (no watches, input display or log while the game's pause screen or map is open)
+ *   hide_over_item_wheel=0|1 (the same while its item wheel is up)
+ *   save_backups=0|1 (copy the game's save folder to the SD card after every save, savebackup.h)
+ *   save_backup_location=0|1 (the save's location after the date in their folder names)
+ *   save_backup_kinds=0|1|2 (autosaves, hard saves, both)
  *   input_display_position=<gfx_corner_t>   input_display_x=, input_display_y= (custom: thousandths)
  *   settings_version=<n> (SETTINGS_VERSION when saved: what settings_load has updated the file for)
  *
@@ -27,6 +32,8 @@
 #include "airwall.h"
 #include "savepos.h"
 #include "voidmap.h"
+#include "flaglog.h"
+#include "savebackup.h"
 
 #include "sdfs.h"
 #include "lang.h"
@@ -112,6 +119,13 @@ typedef struct {
   int32_t enemy_hp_xray;
   int32_t menu_style;
   int32_t hide_in_game_menus;
+  int32_t hide_over_item_wheel;
+  int32_t save_backups;
+  int32_t save_backup_location;
+  int32_t save_backup_kinds;
+  int32_t flag_log;
+  int32_t flag_log_status;
+  int32_t flag_log_story;
 } snapshot_t;
 
 static bool mounted;
@@ -187,6 +201,13 @@ static snapshot_t take_snapshot(void)
   s.enemy_hp_xray = enemy_hp_xray;
   s.menu_style = gfx_style;
   s.hide_in_game_menus = hide_in_game_menus;
+  s.hide_over_item_wheel = hide_over_item_wheel;
+  s.save_backups = save_backup_enabled;
+  s.save_backup_location = save_backup_location;
+  s.save_backup_kinds = save_backup_kinds;
+  s.flag_log = flaglog_enabled;
+  s.flag_log_status = flaglog_status_enabled;
+  s.flag_log_story = flaglog_story_enabled;
   return s;
 }
 
@@ -251,6 +272,11 @@ static void apply_snapshot(const snapshot_t *s)
   if (s->menu_style >= 0 && s->menu_style < GFX_STYLES)
     gfx_style = s->menu_style;
   hide_in_game_menus = s->hide_in_game_menus != 0;
+  hide_over_item_wheel = s->hide_over_item_wheel != 0;
+  save_backup_enabled = s->save_backups != 0;
+  save_backup_location = s->save_backup_location != 0;
+  if (s->save_backup_kinds >= SAVE_BACKUP_AUTO && s->save_backup_kinds <= SAVE_BACKUP_BOTH)
+    save_backup_kinds = s->save_backup_kinds;
   warp_arrival_cutscenes = s->arrival_cutscenes != 0;
   levitate_enabled = s->levitate != 0;
   if (s->levitate_speed >= 0 && s->levitate_speed <= LEVITATE_SPEED_MAX)
@@ -273,6 +299,9 @@ static void apply_snapshot(const snapshot_t *s)
   voidmap_areas = s->voidmap_areas != 0;
   enemy_hp_shown = s->enemy_hp != 0;
   enemy_hp_xray = s->enemy_hp_xray != 0;
+  flaglog_enabled = s->flag_log != 0;
+  flaglog_status_enabled = s->flag_log_status != 0;
+  flaglog_story_enabled = s->flag_log_story != 0;
 }
 
 /* --- reading the file ------------------------------------------------------------------------- */
@@ -364,6 +393,13 @@ static const struct { const char *key; size_t field_offset; } int_keys[] = {
   INT_KEY("enemy_health_xray", enemy_hp_xray),
   INT_KEY("menu_style", menu_style),
   INT_KEY("hide_in_game_menus", hide_in_game_menus),
+  INT_KEY("hide_over_item_wheel", hide_over_item_wheel),
+  INT_KEY("save_backups", save_backups),
+  INT_KEY("save_backup_location", save_backup_location),
+  INT_KEY("save_backup_kinds", save_backup_kinds),
+  INT_KEY("flag_log", flag_log),
+  INT_KEY("flag_log_player_status", flag_log_status),
+  INT_KEY("flag_log_story", flag_log_story),
 };
 #define N_INT_KEYS (sizeof(int_keys) / sizeof(*int_keys))
 
@@ -506,9 +542,9 @@ void settings_load(void)
     parse_line(line, &s, &have_list);
     line = line_break ? end + 1 : end;
   }
-  /* a file from before the game's style: the game's, as for everyone */
-  if (s.menu_style < 0)
-    s.menu_style = GFX_STYLE_GAME;
+  /* the game's style, always: settings no longer offers gz's, so a file that chose it (or predates the
+   * game's) gets the game's; the file says 0 from the next time the settings are saved */
+  s.menu_style = GFX_STYLE_GAME;
   /* a file from before frame advance was off by default: off, once (saved below with the version) */
   bool updated = got && s.settings_version < SETTINGS_VERSION;
   if (got && s.settings_version < 1)
@@ -562,11 +598,15 @@ static void save_settings_file(const snapshot_t *s)
                   "menu_size=%d\n"
                   "input_display=%d\ninput_display_background=%d\ninput_display_parts=%d\n"
                   "input_display_style=%d\ninput_display_size=%d\ninput_display_position=%d\n"
-                  "input_display_x=%d\ninput_display_y=%d\nmenu_style=%d\nhide_in_game_menus=%d\n",
+                  "input_display_x=%d\ninput_display_y=%d\nmenu_style=%d\nhide_in_game_menus=%d\nhide_over_item_wheel=%d\nsave_backups=%d\nsave_backup_location=%d\nsave_backup_kinds=%d\nflag_log=%d\n"
+                  "flag_log_player_status=%d\nflag_log_story=%d\n",
                   s->lang, (int)s->frame_advance, (int)s->frame_advance_in_pause, (int)s->frame_advance_button, (int)s->pause_display,
                   (int)s->menu_scale, (int)s->input_display, (int)s->input_display_bg, (int)s->input_parts,
                   (int)s->input_style, (int)s->input_size, (int)s->input_position, (int)s->input_x,
-                  (int)s->input_y, (int)s->menu_style, (int)s->hide_in_game_menus);
+                  (int)s->input_y, (int)s->menu_style, (int)s->hide_in_game_menus, (int)s->hide_over_item_wheel,
+                  (int)s->save_backups, (int)s->save_backup_location,
+                  (int)s->save_backup_kinds, (int)s->flag_log,
+                  (int)s->flag_log_status, (int)s->flag_log_story);
   if (n < (int)sizeof(buf))
     n += snprintf(buf + n, sizeof(buf) - n,
                   "voids_shown=%d\nvoids_ground=%d\nvoids_deadly=%d\nvoids_ring=%d\n"

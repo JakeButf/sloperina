@@ -31,6 +31,7 @@
 
 #include "cheats.h"
 #include "cct.h"
+#include "data.h"
 #include "gamedata.h"
 #include "gfx.h"
 #include "input.h"
@@ -39,6 +40,8 @@
 #include "z64hd.h"
 
 float hypotf(float x, float y); /* from sdk */
+float sinf(float x);
+float cosf(float x);
 
 bool levitate_enabled;
 bool levitate_through_walls = true;
@@ -886,15 +889,166 @@ static void protect_landing(bool menu_open)
   }
 }
 
+/* Loading zones: taking an exit writes the destination to Sequence_ReservedNextBanc (GD_STR_NEXT_MAP, FINDINGS
+ * §5.18), which the game clears again later. From then until the map changes or the game clears it (or
+ * MAP_CHANGE_FRAMES) levitate is off and L3 doesn't start it, so Link goes through as he would on foot. */
+#define MAP_CHANGE_FRAMES 600 /* ~10 s: a reservation that never leads to a new map (or the same map) */
+
+static char seen_next[GD_STR_LEN], seen_map[GD_STR_LEN];
+static uint32_t map_change_frame; /* when the last exit was taken; 0: none pending */
+
+static bool copy_if_changed(char *seen, const char *now)
+{
+  int i = 0;
+  while (i < GD_STR_LEN - 1 && now[i] && now[i] == seen[i])
+    i++;
+  if (seen[i] == (i < GD_STR_LEN - 1 ? now[i] : 0))
+    return false;
+  for (i = 0; i < GD_STR_LEN - 1 && now[i]; i++)
+    seen[i] = now[i];
+  seen[i] = 0;
+  return true;
+}
+
+/* true while Link is going through a loading zone */
+static bool changing_map(void)
+{
+  const char *next = gd_get_str(GD_STR_NEXT_MAP);
+  const char *map = gd_get_str(GD_STR_MAP);
+  if (next && copy_if_changed(seen_next, next)) {
+    if (seen_next[0]) {
+      map_change_frame = frame_counter() | 1;
+      log_printf("levitate: exit taken to %s; off until the map loads", seen_next);
+    } else {
+      map_change_frame = 0; /* the game is done with it (the same map: the Lost Woods' loops) */
+    }
+  }
+  if (map && copy_if_changed(seen_map, map))
+    map_change_frame = 0;
+  if (map_change_frame && frame_counter() - map_change_frame > MAP_CHANGE_FRAMES)
+    map_change_frame = 0;
+  return map_change_frame != 0;
+}
+
+/* Loading zone triggers only see Link with his collision on, and through walls (and walk through walls) switch
+ * it off: he'd float through a zone without it firing. So inside one (data_exits, tools/exits.py: the trigger
+ * volumes, placed like air walls: world = t + R (s * local), R = Rz Ry Rx) levitate ends and collision comes
+ * back, and the game takes the exit as it would on foot. */
+#define EXIT_MARGIN 0.5f   /* units: Link's body reaches this far round the point tested */
+#define EXIT_BODY_UP 0.8f  /* the point tested: this far above his feet (his middle) */
+
+static const airmap_t *exit_map;
+static char exit_map_name[64];
+
+static bool same_name(const char *a, const char *b)
+{
+  while (*a && *a == *b) {
+    a++;
+    b++;
+  }
+  return *a == *b;
+}
+
+static const airmap_t *current_exit_map(void)
+{
+  const char *name = gd_get_str(GD_STR_MAP);
+  if (!name)
+    return 0;
+  if (!same_name(name, exit_map_name)) {
+    int i = 0;
+    for (; i < (int)sizeof(exit_map_name) - 1 && name[i]; i++)
+      exit_map_name[i] = name[i];
+    exit_map_name[i] = 0;
+    exit_map = 0;
+    for (int m = 0; m < data_n_exitmaps; m++)
+      if (same_name(data_exitmaps[m].map, exit_map_name))
+        exit_map = &data_exitmaps[m];
+  }
+  return exit_map;
+}
+
+/* p in the exit's own unscaled space: R^T (p - t) / s */
+static void exit_local(const airwall_t *zone, const float p[3], float out[3])
+{
+  float sx = sinf(zone->r[0]), cx = cosf(zone->r[0]);
+  float sy = sinf(zone->r[1]), cy = cosf(zone->r[1]);
+  float sz = sinf(zone->r[2]), cz = cosf(zone->r[2]);
+  float R[9] = { cy * cz, sx * sy * cz - cx * sz, cx * sy * cz + sx * sz,
+                 cy * sz, sx * sy * sz + cx * cz, cx * sy * sz - sx * cz,
+                 -sy,     sx * cy,                cx * cy };
+  float d[3] = { p[0] - zone->t[0], p[1] - zone->t[1], p[2] - zone->t[2] };
+  for (int i = 0; i < 3; i++) {
+    float v = R[i] * d[0] + R[3 + i] * d[1] + R[6 + i] * d[2];
+    out[i] = zone->s[i] != 0 ? v / zone->s[i] : 0;
+  }
+}
+
+static float absf(float v)
+{
+  return v < 0 ? -v : v;
+}
+
+/* the exit Link is in (its destination is logged), or 0 */
+static const airwall_t *exit_at_link(void)
+{
+  const airmap_t *map = current_exit_map();
+  vec3f_t feet;
+  if (!map || !link_drawn_pos(&feet))
+    return 0;
+  float p[3] = { feet.x, feet.y + EXIT_BODY_UP, feet.z };
+  for (int i = 0; i < map->n; i++) {
+    const airwall_t *zone = &data_exits[map->first + i];
+    float local[3], margin[3];
+    exit_local(zone, p, local);
+    for (int k = 0; k < 3; k++)
+      margin[k] = zone->s[k] != 0 ? EXIT_MARGIN / absf(zone->s[k]) : 0;
+    for (int s = 0; s < zone->n_shapes; s++) {
+      const airshape_t *shape = &data_exitshapes[zone->first_shape + s];
+      bool inside;
+      if (shape->type == SHAPE_BOX) {
+        inside = absf(local[0] - shape->a[0]) <= shape->b[0] + margin[0] &&
+                 absf(local[1] - shape->a[1]) <= shape->b[1] + margin[1] &&
+                 absf(local[2] - shape->a[2]) <= shape->b[2] + margin[2];
+      } else { /* a cylinder standing upright between a and b */
+        float low = shape->a[1] < shape->b[1] ? shape->a[1] : shape->b[1];
+        float high = shape->a[1] < shape->b[1] ? shape->b[1] : shape->a[1];
+        float r = shape->radius + (margin[0] > margin[2] ? margin[0] : margin[2]);
+        float dx = local[0] - shape->a[0], dz = local[2] - shape->a[2];
+        inside = local[1] >= low - margin[1] && local[1] <= high + margin[1] && dx * dx + dz * dz <= r * r;
+      }
+      if (inside)
+        return zone;
+    }
+  }
+  return 0;
+}
+
+static const airwall_t *in_exit; /* this frame's exit_at_link, while Link's collision is (or would be) off */
+
 /* L3: start / stop */
 static void handle_l3(bool menu_open)
 {
-  if (!levitate_enabled) {
+  in_exit = (floating || phasing || (levitate_enabled && (input_pressed() & BTN_LSTICK)) || cheats[CHEAT_WALLS])
+              ? exit_at_link() : 0;
+  if (in_exit && floating) {
+    log_printf("levitate: in a loading zone (%s map, zone %d); collision back on", exit_map_name,
+               (int)(in_exit - &data_exits[exit_map->first]));
+    gfx_notice("levitate off: loading zone");
+    drop();
+    return;
+  }
+  if (changing_map()) {
+    if (floating)
+      gfx_notice("levitate off: loading zone");
+    drop();
+  } else if (!levitate_enabled) {
     drop();
   } else if (!menu_open && (input_pressed() & BTN_LSTICK)) {
     if (floating) {
       drop();
       gfx_notice("levitate off");
+    } else if (in_exit) {
+      gfx_notice("levitate: not in a loading zone");
     } else {
       floating = true;
       quiet_search = false;
@@ -1030,7 +1184,7 @@ static void frame(bool menu_open)
   }
 
   bool want_speed = cheats[CHEAT_SPEED] && !floating && !menu_open;
-  bool want_walls = cheats[CHEAT_WALLS] && !floating && !menu_open;
+  bool want_walls = cheats[CHEAT_WALLS] && !floating && !menu_open && !in_exit;
   if (search_state == SEARCH_READY)
     requested = false;
   if (search_state == SEARCH_IDLE && (floating || want_speed || want_walls || requested)) {
