@@ -285,7 +285,7 @@ in-game; test normal jumps, sidehops, jumpslashes, scene changes, and restarts o
 The top-level **save management** menu: copies of the game's save folder on the SD card, made after each save or
 when you ask, and putting one back in place of the save.
 
-Under **automatic save archive**: after a save the game makes, the whole save folder (every slot, and the options)
+**automatic save archive >** is a menu of its own: after a save the game makes, the whole save folder (every slot, and the options)
 can be copied to `sloperinaGZ/save-backups/<date>_<time>/` on the SD card, e.g. `2026-11-15_21-30-05` (year first, so
 they sort by date). The newest 100 are kept; older ones are deleted. Each is about 1 MB.
 
@@ -293,7 +293,8 @@ they sort by date). The newest 100 are kept; older ones are deleted. Each is abo
 |---|---|
 | **enable** | Turns the automatic archives on. Off by default. The two below are its options. |
 | **back up option** | **autosaves** (the game's own, at loading zones and events), **hard saves** (from the save screen, or game over's save prompt) or **both** (the default). Changing only the options is never archived. |
-| **location in folder name** | Off by default. Adds where the save was made, as the game's save screen names it, after the date: `2026-11-15_21-30-05 - Temple of Time`. |
+| **hard saves numbered** | On by default. A hard save becomes the next numbered archive where **archive now** puts them (**save new archives here**), named as it names them: `save-archives/Any% run/#008 - Goron City - 18-11-2026 15-47`, the location where the save was made, then the date and time. They go up from **next number** in sequence and are never deleted automatically. Off: hard saves are dated copies in `save-backups/`, with the autosaves. |
+| **location in folder name** | Off by default. For the dated copies in `save-backups/`: adds where the save was made, as the game's save screen names it, after the date: `2026-11-15_21-30-05 - Temple of Time`. |
 
 Under **save archives** (these work whether or not **enable** is on):
 
@@ -305,13 +306,21 @@ Under **save archives** (these work whether or not **enable** is on):
 
 **manage archives** has two folders:
 
-- **named archives** (`save-archives/`): under **this folder**, **new folder** (the folder icon) names a folder
-  and makes it here; **save new archives here** makes this the folder **archive now** puts them in (and numbers
-  from), and says **(they go here now)** when it is; **delete this folder** (not the top one) deletes it with every
-  archive and folder in it, after **L** and **L** again. Under **in it**: **..** (up a folder), then its folders (the
-  folder icon; **L** opens one), A to Z, then its archives, highest number first. A folder's path shows at the top,
-  e.g. `save-archives/Any% run/Forest`.
+- **named archives** (`save-archives/`): under the folder's path, a row of buttons, picked with D-pad left / right,
+  each said in the hint: **up a folder** (a folder with a green ^), **new folder** (a folder with a green +: names a
+  folder and makes it here), **archive now** (a floppy disk with a green +: names an archive and copies the save
+  into this folder, numbered from its highest), **save new archives here** (a floppy disk: **archive now** and numbered hard saves put
+  them in this folder, numbered from its highest; with a green tick when they go here already) and **delete this
+  folder** (a folder with a red x: it and every archive and folder in it). Delete asks first on a screen of its own,
+  **delete this folder?**, with the folder, what it holds and that it can't be undone: **no, keep it** (where the
+  cursor starts; back does the same) or **yes, delete it**. In
+  `save-archives/` itself there's no **up a folder** or **delete this folder**. Under **in it**: its folders (the
+  folder icon; **L** opens one), A to Z, then its archives, highest number first. The path shows at the top, e.g.
+  `save-archives/Any% run/Forest`.
 - **automatic archives** (`save-backups/`): the automatic ones, newest first.
+
+In both, the folder's line and controls stay at the top and **return** at the bottom: only what's in it scrolls,
+with the scroll bar beside it.
 
 **L** on an archive opens it: its name, **restore** and **delete**. Each takes **L**, which shows **L again:
 restore** (or **delete**), then **L** again; moving off it cancels. **delete** removes it from the SD card for good.

@@ -12,6 +12,7 @@
  *   save_backups=0|1 (copy the game's save folder to the SD card after every save, savebackup.h)
  *   save_backup_location=0|1 (the save's location after the date in their folder names)
  *   save_backup_kinds=0|1|2 (autosaves, hard saves, both)
+ *   save_backup_hard_numbered=0|1 (a hard save as the next numbered archive in archive_folder, not in save-backups/)
  *   input_display_position=<gfx_corner_t>   input_display_x=, input_display_y= (custom: thousandths)
  *   input_display_attach=0|1|2 (on its own, joined above the watches box, below it)
  *   archive_folder=<folder in save-archives/, e.g. Any% run/Forest> (where archive now puts them; "": the top)
@@ -134,6 +135,7 @@ typedef struct {
   int32_t save_backups;
   int32_t save_backup_location;
   int32_t save_backup_kinds;
+  int32_t save_backup_numbered;
   int32_t flag_log;
   int32_t flag_log_status;
   int32_t flag_log_story;
@@ -221,6 +223,7 @@ static snapshot_t take_snapshot(void)
   s.save_backups = save_backup_enabled;
   s.save_backup_location = save_backup_location;
   s.save_backup_kinds = save_backup_kinds;
+  s.save_backup_numbered = save_backup_hard_numbered;
   s.flag_log = flaglog_enabled;
   s.flag_log_status = flaglog_status_enabled;
   s.flag_log_story = flaglog_story_enabled;
@@ -298,6 +301,7 @@ static void apply_snapshot(const snapshot_t *s)
   save_backup_location = s->save_backup_location != 0;
   if (s->save_backup_kinds >= SAVE_BACKUP_AUTO && s->save_backup_kinds <= SAVE_BACKUP_BOTH)
     save_backup_kinds = s->save_backup_kinds;
+  save_backup_hard_numbered = s->save_backup_numbered != 0;
   warp_arrival_cutscenes = s->arrival_cutscenes != 0;
   levitate_enabled = s->levitate != 0;
   if (s->levitate_speed >= 0 && s->levitate_speed <= LEVITATE_SPEED_MAX)
@@ -420,6 +424,7 @@ static const struct { const char *key; size_t field_offset; } int_keys[] = {
   INT_KEY("save_backups", save_backups),
   INT_KEY("save_backup_location", save_backup_location),
   INT_KEY("save_backup_kinds", save_backup_kinds),
+  INT_KEY("save_backup_hard_numbered", save_backup_numbered),
   INT_KEY("flag_log", flag_log),
   INT_KEY("flag_log_player_status", flag_log_status),
   INT_KEY("flag_log_story", flag_log_story),
@@ -665,6 +670,8 @@ static void save_settings_file(const snapshot_t *s)
                   (int)s->voidmap_shown, (int)s->voidmap_ground, (int)s->voidmap_deadly, (int)s->voidmap_ring,
                   (int)s->voidmap_xray, (int)s->voidmap_areas, (int)s->input_attach, s->archive_folder,
                   (int)s->system_keyboard);
+  if (n < (int)sizeof(buf))
+    n += snprintf(buf + n, sizeof(buf) - n, "save_backup_hard_numbered=%d\n", (int)s->save_backup_numbered);
   for (int c = 0; c < CMD_COUNT && n < (int)sizeof(buf); c++) {
     char name[48];
     bind_name(s->binds[c], name, sizeof(name));

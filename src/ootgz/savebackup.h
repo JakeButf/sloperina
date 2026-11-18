@@ -19,6 +19,9 @@ enum { SAVE_BACKUP_AUTO, SAVE_BACKUP_HARD, SAVE_BACKUP_BOTH };
 extern bool save_backup_enabled;
 extern int save_backup_kinds;     /* which saves: SAVE_BACKUP_* */
 extern bool save_backup_location; /* " - <location>" after the date in the folder names */
+/* a hard save as the next numbered archive where archive now puts them ("#008 - <location> - <date>"), not in
+ * save-backups/ with the autosaves */
+extern bool save_backup_hard_numbered;
 
 /* At module init: hook main's nn::fs::CommitSaveData. Returns 0, or what went wrong. */
 const char *savebackup_hook_game(uintptr_t main_base);
@@ -51,6 +54,7 @@ bool savebackup_browse_into(int i);         /* into folder i of the last list */
 void savebackup_browse_up(void);
 void savebackup_browse_top(void);
 void savebackup_archive_here(void);         /* new archives go to the folder looked at */
+void savebackup_archive_here_now(const char *name); /* archive now, into the folder looked at (its own numbers) */
 bool savebackup_make_folder(const char *name); /* a folder in the one looked at */
 bool savebackup_delete_folder(void);        /* the one looked at, and all in it; then up a folder */
 /* Archive the save mount as it is, then copy archive i (of the last list) into it, every file but the options,

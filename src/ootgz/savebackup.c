@@ -25,6 +25,7 @@
 
 bool save_backup_enabled;
 bool save_backup_location;
+bool save_backup_hard_numbered = true;
 int save_backup_kinds = SAVE_BACKUP_BOTH;
 
 /* Which kind a commit is: the game's menu screen when it happened (the Enum 0x578D41E1, as gd_game_menu_screen;
@@ -388,6 +389,20 @@ static bool make_backup(const char *mount, int kind, uint32_t screen, const char
   return !error[0];
 }
 
+/* A hard save commits twice, about a quarter of a second apart (the same files): a backup of the same kind that
+ * soon after the last replaces it, so each save is one folder (a numbered one keeps its number). */
+#define SAME_SAVE_MS 3000
+static char last_auto[PATH_LEN]; /* the last automatic backup's folder (its path), and when, of what kind, its # */
+static uint64_t last_auto_tick;
+static int last_auto_kind = -1, last_auto_number;
+static bool last_numbered;       /* the last backup was a hard save's numbered archive (savebackup_frame says so) */
+
+/* save management's, below: where archive now puts them, and the next number there (0: not looked for yet) */
+static char archive_to[SAVE_FOLDER_LEN];
+static int next_number;
+static void archive_path(char *out, const char *rel);
+static void archive_name(char *folder, int len, int number, const char *label);
+
 static void back_up(const char *mount)
 {
   if (mount && strlen(mount) < sizeof(save_mount) && compare_names(mount, save_mount))
@@ -409,7 +424,36 @@ static void back_up(const char *mount)
   }
   if (__atomic_exchange_n(&busy, 1, __ATOMIC_ACQUIRE))
     return; /* another thread's commit is being copied: that copy is as new */
-  make_backup(mount, kind, screen, 0, 0, true);
+  uint64_t now = sys_tick();
+  bool same_save = kind == last_auto_kind && last_auto[0] &&
+                   now - last_auto_tick < SAME_SAVE_MS * (sys_tick_freq() / 1000);
+  /* a hard save: the next numbered archive where archive now puts them ("#008 - Goron City - <date>"), as soon as
+   * that number's known (savebackup_frame looks for it); else, as an autosave, a dated one in save-backups/ */
+  bool numbered = kind == KIND_HARD && save_backup_hard_numbered;
+  int number = 0;
+  char name[STAMP_LEN], dir[PATH_LEN], path[PATH_LEN];
+  if (numbered) {
+    number = same_save && last_auto_number ? last_auto_number : __atomic_load_n(&next_number, __ATOMIC_ACQUIRE);
+    numbered = number > 0;
+  }
+  if (numbered) {
+    archive_name(name, sizeof(name), number, location_name());
+    archive_path(dir, archive_to);
+  }
+  bool made = numbered ? make_backup(mount, kind, screen, dir, name, false)
+                        : make_backup(mount, kind, screen, 0, 0, true);
+  if (made) {
+    join(path, numbered ? dir : BACKUP_DIR, last_stamp);
+    if (same_save && delete_tree && compare_names(last_auto, path)) /* the same save's first commit */
+      delete_tree(last_auto);
+    if (numbered && !(same_save && last_auto_number == number))
+      __atomic_store_n(&next_number, number + 1, __ATOMIC_RELEASE);
+    memcpy(last_auto, path, sizeof(last_auto));
+    last_auto_tick = now;
+    last_auto_kind = kind;
+    last_auto_number = numbered ? number : 0;
+    last_numbered = numbered;
+  }
   __atomic_store_n(&busy, 0, __ATOMIC_RELEASE);
 }
 
@@ -462,6 +506,10 @@ void savebackup_frame(void)
   if (gd_get_enum(GD_MENU_SCREEN, &screen)) /* also when off: archive now and restore name folders the same way */
     __atomic_store_n(&menu_screen, screen, __ATOMIC_RELEASE);
   reload_frame();
+  /* the next number for a hard save's archive, found on this thread before a save needs it (a save may come on
+   * another; looking needs the folder's list) */
+  if (save_backup_enabled && save_backup_hard_numbered && !__atomic_load_n(&next_number, __ATOMIC_ACQUIRE))
+    savebackup_next_number();
   int skipped = __atomic_load_n(&skips, __ATOMIC_ACQUIRE);
   if (skipped != skips_reported) {
     skips_reported = skipped;
@@ -489,7 +537,8 @@ void savebackup_frame(void)
   } else {
     log_printf("save backup %s (%s, menu screen %08x) from %s: %d files, %lld bytes, %u ms", last_stamp,
                kind_names[last_kind], (unsigned)last_screen, last_mount, last_files, (long long)last_bytes, ms);
-    gfx_notice(last_kind == KIND_MANUAL ? "save archived" : "save backed up");
+    gfx_notice(last_kind == KIND_MANUAL || (last_kind == KIND_HARD && last_numbered) ? "save archived"
+                                                                                      : "save backed up");
   }
 }
 
@@ -626,17 +675,29 @@ void savebackup_set_archive_folder(const char *rel)
   next_number = 0; /* looked for again, in that folder */
 }
 
+/* the highest archive number in a folder (relative to ARCHIVE_DIR) + 1 */
+static int number_after_highest(const char *rel)
+{
+  char dir[PATH_LEN];
+  archive_path(dir, rel);
+  int n = list_dir(dir, scan_names, SAVE_ARCHIVES_LISTED), highest = 0;
+  for (int i = 0; i < n; i++)
+    if (archive_number(scan_names[i]) > highest)
+      highest = archive_number(scan_names[i]);
+  return highest + 1;
+}
+
+static bool same_folder(const char *a, const char *b)
+{
+  while (*a && *a == *b)
+    a++, b++;
+  return *a == *b;
+}
+
 int savebackup_next_number(void)
 {
-  if (!next_number && open_dir && settings_sd() && !__atomic_load_n(&busy, __ATOMIC_ACQUIRE)) {
-    char dir[PATH_LEN];
-    archive_path(dir, archive_to);
-    int n = list_dir(dir, scan_names, SAVE_ARCHIVES_LISTED), highest = 0;
-    for (int i = 0; i < n; i++)
-      if (archive_number(scan_names[i]) > highest)
-        highest = archive_number(scan_names[i]);
-    next_number = highest + 1;
-  }
+  if (!next_number && open_dir && settings_sd() && !__atomic_load_n(&busy, __ATOMIC_ACQUIRE))
+    next_number = number_after_highest(archive_to);
   return next_number ? next_number : 1;
 }
 
@@ -663,7 +724,20 @@ static const char *clean_name(const char *typed, char *out)
   return start;
 }
 
-void savebackup_archive_now(const char *name)
+/* a numbered archive's folder name: "#007 - <label> - DD-MM-YYYY HH-MM" (no label: "#007 - <date>") */
+static void archive_name(char *folder, int len, int number, const char *label)
+{
+  int n = snprintf(folder, len, "#%03d", number);
+  if (label && *label)
+    n = append_clean(folder, len, append_clean(folder, len, n, " - "), label);
+  nn_calendar_time_t cal;
+  if (now_calendar(&cal) && n < len)
+    snprintf(folder + n, len - n, " - %02d-%02d-%04d %02d-%02d", cal.day, cal.month, cal.year, cal.hour, cal.minute);
+}
+
+/* archive now into folder `rel`: where new archives go (its next number, then up one), or another (numbered from
+ * its own highest) */
+static void archive_into(const char *rel, const char *name)
 {
   const char *why = unavailable();
   if (why) {
@@ -671,27 +745,25 @@ void savebackup_archive_now(const char *name)
     return;
   }
   /* "#007 - Temple of Time - 18-11-2026 21-30": the name, or (none typed) the location */
-  int number = savebackup_next_number();
+  bool usual = same_folder(rel, archive_to);
+  int number = usual ? savebackup_next_number() : number_after_highest(rel);
   char folder[STAMP_LEN], typed[SAVE_ARCHIVE_NAME_MAX + 1], dir[PATH_LEN];
-  int n = snprintf(folder, sizeof(folder), "#%03d", number);
   const char *label = clean_name(name, typed);
-  if (!*label)
-    label = location_name();
-  if (*label)
-    n = append_clean(folder, sizeof(folder), append_clean(folder, sizeof(folder), n, " - "), label);
-  nn_calendar_time_t cal;
-  if (now_calendar(&cal))
-    snprintf(folder + n, sizeof(folder) - n, " - %02d-%02d-%04d %02d-%02d", cal.day, cal.month, cal.year, cal.hour,
-             cal.minute);
-  archive_path(dir, archive_to);
+  archive_name(folder, sizeof(folder), number, *label ? label : location_name());
+  archive_path(dir, rel);
   if (__atomic_exchange_n(&busy, 1, __ATOMIC_ACQUIRE)) {
     gfx_notice(T("the game is saving: try again"));
     return;
   }
-  if (make_backup(save_mount, KIND_MANUAL, __atomic_load_n(&menu_screen, __ATOMIC_ACQUIRE), dir, folder, false))
+  if (make_backup(save_mount, KIND_MANUAL, __atomic_load_n(&menu_screen, __ATOMIC_ACQUIRE), dir, folder, false) &&
+      usual)
     savebackup_set_next_number(number + 1);
   __atomic_store_n(&busy, 0, __ATOMIC_RELEASE); /* savebackup_frame reports it */
 }
+
+void savebackup_archive_now(const char *name) { archive_into(archive_to, name); }
+
+void savebackup_archive_here_now(const char *name) { archive_into(browsing, name); }
 
 /* list a folder into the last list: its folders first, A to Z, then its archives, greatest name first */
 static int list_folder(const char *path)
