@@ -1191,3 +1191,59 @@ the leave's calls.**
 - **Not checked:** whether Link's normal AI lets the ragdoll last outside an event, and whether C`+0x17C` going
   back to 0 is how the game ends one itself (`ragdoll.c` logs C`+0x17C` / `+0x188` as they change, tagged
   `ragdoll:`). 1.0.0 offsets aren't known.
+
+### 9.10 Ending the running event (1.0.0; 1.1.1 addresses in brackets; checked in game on 1.0.0)
+- **The event manager:** M = `[[main+0x4C183E8]]` [`[[main+0x4C7E090]]`] (`event_mgr_ptr`). E = `[M+0x68]` is the
+  running event (0: none; the same value as `[[main+0x4E94840]+0x68]`, §9.7). E holds its flows: pointers at
+  `E+0xEB8`, count (s32) at `E+0xEB0`, current index (u32) at `E+0xF18`. A flow's name is a `char *` at `flow+0x8`,
+  its player P at `flow+0x220`, and a u64 of flags at `flow+0x3B8`:
+  - bit 11 (`0x800`): stop. Set by `main+0x3ADD5B0(flow)`.
+  - bit 12 (and 13): ended by the flowchart. Set by `main+0x3ADD5C0(flow, bool)`, which also sets bit 11 of
+    `[flow+0x228]+0x1F8`.
+  - bits 25-26: a timeline is playing (below).
+- **The event's update** [`main+0x3B3BB68`] calls the current flow's P slot 3; when it
+  reports done, it moves on to the flow named at `[flow+0x98]` unless bits 11-12 are set.
+- **Two kinds of event:**
+  - **Timeline** (a played-back cutscene): the flow's bit 25 is set while its timeline plays. The flow's vtable (1.1.1
+    `main+0x4C62D58`) starts the timeline with slot 18 `main+0x3AE1D60` [`main+0x3B3F460`] (time `flow+0x3F8` and the
+    timeline player `[flow+0x3E0]` back to 0, then `main+0x3ADD7D0(flow, true)` [`main+0x3B3AF50`] sets bit 25),
+    advances it with slot 20 and clears bits 25, 26 and 28 at its end with slot 21. Calling slot 18 on a running
+    event restarts its timeline.
+  - **Flowchart** (camera moves and text boxes): bit 25 is never set. Kakariko Village's first arrival
+    (`Dm_Kakariko_0000`, flags `0x80004083`) and Impa's farewell (`HyruleField_DoorOfTime_SendOff` >
+    `Dm_HrlField_0020`) are flowcharts.
+- **The game's skip** (timelines only): `SeqOneShotEventRequestForceSkip` (vtable `main+0x4B4B678`, slot 39
+  `main+0x32729D0` [`main+0x4BB0970`, `main+0x32D1890`]) and `SeqExecuteEventForceSkipAndWaitFinish` (enter
+  `main+0x3260700`, update `main+0x3260770` [`main+0x32BF870`, `main+0x32BF8E0`]) call `main+0x3ADD7B0(flow)`
+  [`main+0x3B3AF30`] on the current flow: P's vtable slot 11, `main+0x3AE3F30` [`main+0x3B41630`] for P vtables
+  `main+0x4ABC640`, `main+0x4BFD318` [`main+0x4B21610`, `main+0x4C62F20`]:
+  ```
+  if (P+0x2C == 3 /* playing; slot 8 */ && [P+0x10]+0x3B8 bit 25 /* timeline playing */
+      && main+0x3AE2F40([P+0x20]))  /* [main+0x3B40640]: settings object (slot 9) +0x1A6 == 0 and +0x1A5 < 1 */
+    P+0x28 |= 0x20;                /* skip requested */
+  ```
+  The WaitFinish update repeats it every 180 updates until `[M+0x68]` is 0 and `M+0xB8` bit 14 is clear. Only the
+  title sequences use these nodes (`Sequence/BeforeTitle(.110)`, `CloseTitle(.110)`).
+- **The manager's cancel** (any event): in its update's loop over events (`M+0x278`, `main+0x3AEE85C`), an event
+  without `E+0xF24` set is cancelled when `M+0xB8` bit 2 is set (all events) or bit 3 is set and it is the running
+  event: `main+0x3ADD5B0` on the current flow (bit 11) and `E+0xF24` = 1. The node runner (`main+0xE52450`) then
+  drops the flow, and the event is gone the next frame (both flowcharts above, checked in game). A flowchart's own
+  end (`main+0xE53114`) does the same with `main+0x3ADD5C0(flow, true)`.
+- **No other event starts while one runs** [`main+0xD7A9D0`, the acceptance behind the request submit]: a request
+  is refused when `M+0xB8` bit 0 is set, when the running event's name at `[M+0xC0]` differs from its own, or
+  whenever `[M+0x68]` ≠ 0 and it isn't a sub-event. The `PrioritySetting` priorities (table `main+0x3F6FCF0`
+  [1.1.1]: 1, 10, 50, 300, 400, 600, 999; lower wins) only decide between queued requests (`M+0x300`) while nothing
+  runs. So a warp or map reload can't interrupt an event (checked in game: refused, `M+0xB8` = `0x28000`).
+- **Settings:**
+  - `SkipSetting.IsDisableSkip` (`engine__event__SkipSetting`, byte `+0x39`): set only by the component
+    `Event/EventSetting/EventSettingComponent/SkipSetting/DisableSkip`, used by `Dm_Kokiri_0000`, `Dm_Title_0005` and
+    `Dm_StaffCredit_0005`. The force skip and the cancel don't read it.
+  - Skip settings named in main but used by no event file, AINB or event flow in romfs: `IsEventSkipedMostRecent`,
+    `IsStopByEventSkip`, `BgmsStopOnEventSkip`, `IsSkipAutoPlayNextEvent`, `IsASEventSkipOnlyAttack`,
+    `IsASEventSkipPosUpdate`. `IsNotOpenIfSkipedMostRecent` is used once, by `AI/MiniGameNpcCommon.event.root.ainb`.
+  - A screen named `UIEventSkipScreen` exists (`main+0x33DC040` [1.1.1]); what opens it wasn't traced.
+- **Story flags:** an event ended early doesn't run the rest of its flowchart, so its later GameData writes and the
+  `HavePlayedEvent.<event>` the game sets when it plays may be missing; the flag log (`flaglog.c`) shows which.
+- **`eventskip.c`** (scene > end cutscene): skips every flow with bit 25 set (with the bounds checks, repeated every
+  180 frames like the WaitFinish node, up to 1800 frames); an event with no timeline gets the manager's cancel. It
+  logs each flow on the first press (`eventskip: flow i/n ...`) and when the event is gone.

@@ -97,6 +97,9 @@ struct z64hd_build {
   /* [main+this]: the event state the restart point update checks (+0x68: an event is running, FINDINGS 9.7);
    * 0: not known for this build */
   uint32_t event_state_ptr;
+  /* [[main+event_mgr_ptr]+0x68] +this: the running event's array of flows (eventskip.c, FINDINGS 9.10);
+   * 0: not known for this build */
+  uint32_t event_flows;
   /* Link's ragdoll (ragdoll.c, FINDINGS 9.9); 0: not known for this build */
   uint32_t ragdoll_controller;   /* controller (object): Link's ragdoll controller, NULL if he has none */
   struct z64hd_link_path link_paths[5];

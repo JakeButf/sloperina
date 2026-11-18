@@ -1,0 +1,15 @@
+/* End the running event (a cutscene, a dialogue, a chest): a timeline is skipped as the game's
+ * SeqExecuteEventForceSkipAndWaitFinish node does, anything else cancelled as the event manager does (FINDINGS 9.10). */
+#ifndef EVENTSKIP_H
+#define EVENTSKIP_H
+
+#include <stdbool.h>
+
+bool eventskip_known(void);   /* this build's event layout is known */
+bool eventskip_running(void); /* an event is running */
+/* game thread: skip or cancel the running event; false if none runs or it couldn't be done */
+bool eventskip_start(void);
+/* game thread, once a frame: repeats a skip while the event (or the next one in its chain) still runs */
+void eventskip_frame(void);
+
+#endif

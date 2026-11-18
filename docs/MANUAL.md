@@ -111,6 +111,7 @@ and you'll come out at the chosen place. Under **return**: the **current** map a
 | Item | What it does |
 |---|---|
 | **reload map** | Reloads the current map (at the age set in **link**). |
+| **end cutscene** | Ends the cutscene (or dialogue, chest opening or other event) that's playing. A played-back cutscene is skipped the way the game's own skip does; any other event is cancelled the way the game cancels one. Flags the rest of the event would have set aren't set, so it may play again. |
 | *collision* | |
 | **environment** | See below. |
 | **void out** | See [2.3.3](#233-void-out). |

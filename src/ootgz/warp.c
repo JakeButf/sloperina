@@ -145,6 +145,27 @@ static void destroy_request(void)
   MAIN_FN(req_dtor_t, z64hd_game->event_req_sub_dtor)(request + Z64HD_EVENT_REQ_SUB_A);
 }
 
+/* What the manager's acceptance (1.1.1 main+0xD7A9D0) refuses on: M+0xB8 bit 0, the running event's name at [M+0xC0]
+ * (capacity at M+0xC8) other than the request's, or any running event ([M+0x68]) for a request that isn't a sub-event. */
+static void log_refusal(uintptr_t manager)
+{
+  uint32_t flags = 0, cap = 0;
+  char pending[64] = "?";
+  sys_read32(manager + 0xB8, &flags);
+  uintptr_t name = sys_ptr(manager + 0xC0);
+  if (name && sys_read32(manager + 0xC8, &cap) && cap && sys_mapped(name, 1, SYS_PERM_R)) {
+    size_t n = 0;
+    size_t max = cap < sizeof(pending) ? cap : sizeof(pending);
+    while (n + 1 < max && sys_mapped(name + n, 1, SYS_PERM_R) && ((const volatile char *)name)[n]) {
+      pending[n] = ((const volatile char *)name)[n];
+      n++;
+    }
+    pending[n] = 0;
+  }
+  log_printf("warp: refused with manager flags %x, running event \"%s\", event running %d", (unsigned)flags,
+             pending, sys_ptr(manager + 0x68) != 0);
+}
+
 static bool request_warp_event(const warp_map_t *map, const spawn_t *spawn)
 {
   uintptr_t manager_holder = sys_ptr(MAIN(z64hd_game->event_mgr_ptr));
@@ -161,8 +182,11 @@ static bool request_warp_event(const warp_map_t *map, const spawn_t *spawn)
             add_param("NextStartPosAir", Z64HD_EVENT_PARAM_STRING, pos_air) &&
             add_param("BootEventName", Z64HD_EVENT_PARAM_STRING, arrival_event(spawn)) &&
             add_param("IsCheckAir", Z64HD_EVENT_PARAM_BOOL, &no);
-  if (ok)
+  if (ok) {
     ok = MAIN_FN(req_submit_t, z64hd_game->event_req_submit)(manager, request);
+    if (!ok)
+      log_refusal((uintptr_t)manager);
+  }
   destroy_request();
   return ok;
 }
