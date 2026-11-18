@@ -605,6 +605,19 @@ Objects:
   (151 zones in 49 maps, all boxes). levitate.c ends levitation (and walk through walls hands collision back) while
   Link's middle is within 0.5 of one, and refuses L3 there. Doors entered with A aren't in this list.
 
+### 5.23 Overlay disappears after a swapchain format change on Switch 2
+- **Symptom/cause:** the overlay initialized for RGBA8 (37), then stopped drawing when the presented
+  texture used RGB10A2 (61). Both formats were already supported, but `draw_overlay` rejected any
+  change from the initial format. Temporary render diagnostics identified the format mismatch.
+- **Fix:** accept supported formats with the same bytes per pixel, retaining allocations and fences.
+  Discard cached opaque pixels, readback metadata and the frame-advance clean picture; their contents
+  belong to the old format. A held-frame restore also checks the target format before copying.
+  Unknown formats and changes in bytes per pixel still skip drawing.
+- **Validation boundary:** console testing on OoT 1.0.0 / system 23.0.1 reported a working overlay
+  with this fix in a 0.0.7-based build that included temporary diagnostics. This port to current
+  upstream has not been tested on hardware. Host tests cover format transitions and cache/held-frame
+  guards; they do not establish GPU behavior, frame advance or broader feature coverage on a console.
+
 ## 6. Things that do not work
 
 - **Using character 0x7F for an icon:** menu, log, splash, and input panels already use it as an

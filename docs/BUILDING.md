@@ -58,6 +58,13 @@ and test2 gives a gentle L3 fall with no landing damage. Logs show the queued ve
 protection ending after landing. Other surfaces, events and scene transitions need broader testing.
 
 
+### Renderer format host tests
+
+`python tests/run_render_format.py --cc C:/msys64/mingw64/bin/gcc.exe` compiles the actual
+format/cache helpers from `nvn.c`; with GCC on PATH, omit `--cc`. It checks every pair of
+supported formats, unknown formats, cache invalidation and the held-frame size/format guard.
+The harness supplies metadata only: it does not exercise NVN, GPU synchronization or drawing.
+
 ## Layout
 
 Mirrors gz (`gz/src/gz`, `gz/lib`, the Makefile's version list):

@@ -353,6 +353,9 @@ static int swapchain_format, bytes_per_pixel;
 static int alloc_scale; /* the scale the buffers were sized for (whole screen pixels per font pixel) */
 static bool origin_lower_left; /* scissor rectangles count from the bottom (NVN's default) */
 static bool warned_format;
+/* Cached frame-advance pixels also become stale when the target format changes. */
+static volatile bool clean_wanted; /* frame advance is paused: keep the game's picture */
+static bool clean_valid;           /* clean_mem holds one */
 
 static void overlay_fail(const char *why)
 {
@@ -521,6 +524,27 @@ static int text_mask_cols[GFX_PANELS], text_mask_rows[GFX_PANELS];
 #define MASK_W(cols) (((cols) + 2) * FONT_W) /* font pixels, unscaled */
 #define MASK_H(rows) ((rows) * CELL_H + FONT_H)
 #define MASK_ALIGN 64
+
+/* Called with the present lock held. Equal-size formats reuse the existing allocations and
+ * fences; only cached pixel contents are discarded. GPU drawing binds the current target. */
+static bool overlay_accept_format(int format)
+{
+  if (format == swapchain_format)
+    return true;
+  int bpp = format_bpp(format);
+  if (!bpp || bpp != bytes_per_pixel)
+    return false;
+  swapchain_format = format;
+  memset(drawn_hash, 0, sizeof(drawn_hash));
+  memset(drawn_w, 0, sizeof(drawn_w));
+  memset(drawn_h, 0, sizeof(drawn_h));
+  memset(drawn_native, 0, sizeof(drawn_native));
+  memset(readback_region, 0, sizeof(readback_region));
+  memset(readback_present, 0, sizeof(readback_present));
+  clean_valid = false;
+  clean_wanted = false;
+  return true;
+}
 
 static void see_through_free(void)
 {
@@ -1800,11 +1824,17 @@ static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index)
   nvn_texture_t *tex = swapchain_textures[index];
   int tw = fn.tex_width(tex);
   int th = fn.tex_height(tex);
-  if (fn.tex_format(tex) != swapchain_format) {
-    if (!warned_format)
-      log_printf("swapchain format changed to %d; not drawing", fn.tex_format(tex));
-    warned_format = true;
-    return;
+  int format = fn.tex_format(tex);
+  if (format != swapchain_format) {
+    int previous = swapchain_format;
+    if (!overlay_accept_format(format)) {
+      if (!warned_format)
+        log_printf("swapchain format changed to %d; not drawing", format);
+      warned_format = true;
+      return;
+    }
+    warned_format = false;
+    log_printf("swapchain format changed from %d to %d; drawing continues", previous, format);
   }
   frame_t frame;
   frame.area = visible_area(window, tw, th);
@@ -2018,10 +2048,13 @@ static bool clean_sync_used;  /* a copy was submitted with clean_sync */
 static uint8_t *clean_mem;    /* clean_storage once its pool is made: the picture, then a page of commands */
 static size_t clean_size;     /* the picture's bytes */
 static int clean_w, clean_h;
-static volatile bool clean_wanted; /* frame advance is paused: keep the game's picture */
-static bool clean_valid;           /* clean_mem holds one */
 static _Alignas(16) uint8_t clean_control[CTRL_SIZE];
 volatile uint32_t nvn_held_presents;
+
+static bool clean_target_matches(int width, int height, int format)
+{
+  return width == clean_w && height == clean_h && format == swapchain_format;
+}
 
 static void held_fail(const char *why)
 {
@@ -2125,8 +2158,8 @@ static void keep_clean_copy(nvn_queue_t *queue, int index)
     return;
   nvn_texture_t *tex = swapchain_textures[index];
   clean_valid = false;
-  if (fn.tex_width(tex) != clean_w || fn.tex_height(tex) != clean_h || fn.tex_format(tex) != swapchain_format)
-    return; /* the window changed size: not drawn while this pause lasts */
+  if (!clean_target_matches(fn.tex_width(tex), fn.tex_height(tex), fn.tex_format(tex)))
+    return; /* the window changed size or format: not drawn while this pause lasts */
   if (!clean_idle(SLOT_WAIT_NS))
     return;
   clean_copy(queue, tex, true);
@@ -2153,7 +2186,7 @@ bool nvn_present_held(void)
   queue_wait_sync(queue, &acquire_sync);
   if (index >= 0 && index < swapchain_texture_count) {
     nvn_texture_t *tex = swapchain_textures[index];
-    if (fn.tex_width(tex) == clean_w && fn.tex_height(tex) == clean_h)
+    if (clean_target_matches(fn.tex_width(tex), fn.tex_height(tex), fn.tex_format(tex)))
       clean_copy(queue, tex, false);
     draw_overlay(queue, window, index);
     gfx_release();
