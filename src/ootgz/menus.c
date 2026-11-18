@@ -22,6 +22,7 @@
 #include "savepos.h"
 #include "voidmap.h"
 #include "ragdoll.h"
+#include "eventskip.h"
 #include "link.h"
 #include "menu.h"
 #include "input.h"
@@ -340,6 +341,12 @@ static int get_age(menu_item_t *it)
 static void set_age(menu_item_t *it, int age)
 {
   age_want(age);
+}
+
+static void act_end_cutscene(menu_item_t *it)
+{
+  if (eventskip_start())
+    menu_close(); /* so the skip can be watched */
 }
 
 static void act_reload_map(menu_item_t *it)
@@ -2381,10 +2388,13 @@ static void build_scene(void)
 {
   build_savepos();
   build_voids();
-  menu_init(&m_scene, "scene", 10);
+  menu_init(&m_scene, "scene", 11);
   menu_item_t *reload = menu_add_action(&m_scene, "reload map", act_reload_map, 0);
   if (reload)
     reload->hint = "L: reload this map (at the age set in the link menu)";
+  menu_item_t *end_cutscene = menu_add_action(&m_scene, "end cutscene", act_end_cutscene, 0);
+  if (end_cutscene)
+    end_cutscene->hint = "L: end the cutscene or event that's playing";
   menu_add_heading(&m_scene, "collision");
   menu_add_submenu(&m_scene, "environment", &m_collision);
   menu_add_submenu(&m_scene, "void out", &m_voids);

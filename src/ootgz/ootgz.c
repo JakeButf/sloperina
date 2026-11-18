@@ -40,6 +40,7 @@
 #include "pouch.h"
 #include "savepos.h"
 #include "ragdoll.h"
+#include "eventskip.h"
 #include "position.h"
 #include "lock.h"
 #include "sys.h"
@@ -401,6 +402,7 @@ static void frame(void)
   divetest_frame(menu_current != 0);
   lock_frame();
   warp_frame();
+  eventskip_frame();
   age_frame();
   gfx_hud_hidden = hud_hidden();
   gfx_frame();

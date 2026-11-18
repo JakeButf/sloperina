@@ -57,6 +57,7 @@ static const struct z64hd_build z64hd_builds[] = {
     .event_req_submit = 0xD3D2B0,
     .event_req_sub_dtor = 0x27C630,
     .event_req_sub_vt = 0x49101E8,
+    .event_flows = 0xEB8,
     .vt_linkobj = 0x4AC0E30,
     .vt_param = 0x4AFE430,
     .disp_ptr = 0x4C18A98,
@@ -146,6 +147,7 @@ static const struct z64hd_build z64hd_builds[] = {
     .voxel_mgr_ptr = 0x4C7DF00,
     .voxel_formats = 0x3EE8840,
     .event_state_ptr = 0x4E94840,
+    .event_flows = 0xEB8,
     .ragdoll_controller = 0x5F88C0,
     .link_paths = {
       { 0x4E371D0, 0x480 }, { 0x4E94858, 0x2E0 }, { 0x4E935B8, 0xEF8 },
