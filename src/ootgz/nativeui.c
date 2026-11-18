@@ -655,7 +655,7 @@ int nativeui_menu_rows(int space, int scale)
 
 enum {
   SHAPE_CHEVRON = 1 /* + its direction */, SHAPE_BOX = 8, SHAPE_BOX_FILLED, SHAPE_TICK, SHAPE_CROSS, SHAPE_PLUS,
-  SHAPE_FOLDER, SHAPE_LOCK,
+  SHAPE_FOLDER, SHAPE_LOCK, SHAPE_FLOPPY,
   SHAPE_ICON = 0x100 /* + gz's character */
 };
 enum { RIGHT, LEFT, UP, DOWN };
@@ -827,6 +827,26 @@ static void paint_folder(uint8_t *cov, int w, int h, int stride, const void *arg
   paint_sampled(cov, w, h, stride, inside_folder, arg);
 }
 
+/* a floppy disk as an outline, as the folder: a body with its top right corner cut, its shutter (filled) at the
+ * top and its label (an outline) at the bottom */
+static bool inside_floppy(float x, float y, int w, int h, const void *arg)
+{
+  (void)arg;
+  float t = h * 0.12f > 1.2f ? h * 0.12f : 1.2f, cut = w * 0.24f;
+  bool outer = in_rounded(x, y, 0, 0, (float)w, (float)h, h * 0.1f) && x - (w - cut) <= y;
+  if (!outer)
+    return false;
+  bool inner = x > t && x < w - t && y > t && y < h - t && x - (w - cut) <= y - t * 1.4f;
+  bool shutter = x >= w * 0.28f && x <= w * 0.64f && y <= h * 0.36f;
+  bool label = x >= w * 0.2f && x <= w * 0.8f && y >= h * 0.56f &&
+               !(x > w * 0.2f + t && x < w * 0.8f - t && y > h * 0.56f + t);
+  return !inner || shutter || label;
+}
+static void paint_floppy(uint8_t *cov, int w, int h, int stride, const void *arg)
+{
+  paint_sampled(cov, w, h, stride, inside_floppy, arg);
+}
+
 /* gz's padlock (a watch held, as JS height's lock): a body, its shackle above it */
 static bool inside_lock(float x, float y, int w, int h, const void *arg)
 {
@@ -852,12 +872,52 @@ static void gpu_icon(nui_legacy_fn legacy, unsigned char c, int cells, float x, 
 {
   if (w <= 0 || h <= 0)
     return;
-  if (c == GFX_ICON_FOLDER || c == (unsigned char)GFX_ICON_LOCK) {
-    int sh = (int)(h * (c == GFX_ICON_FOLDER ? 0.62f : 0.7f) + 0.5f);
-    int sw = c == GFX_ICON_FOLDER ? (int)(sh * 1.3f + 0.5f) : (int)(sh * 0.78f + 0.5f);
-    gpuui_shape(c == GFX_ICON_FOLDER ? SHAPE_FOLDER : SHAPE_LOCK, sw, sh,
-                c == GFX_ICON_FOLDER ? paint_folder : paint_lock, 0, x + (w - sw) / 2.0f, y + (h - sh) / 2.0f,
+  if (c == GFX_ICON_SAVE || c == GFX_ICON_SAVE_HERE || c == GFX_ICON_SAVE_ADD) { /* the floppy, with its badge */
+    int s = (int)(h * 0.62f + 0.5f);
+    float fx = x + (w - s) / 2.0f, fy = y + (h - s) / 2.0f;
+    gpuui_shape(SHAPE_FLOPPY, s, s, paint_floppy, 0, fx, fy, to_gpu(colour, 1));
+    if (c == GFX_ICON_SAVE_HERE) {
+      static const rgb_t tick_green = { 0x5C, 0xD6, 0x5C }, tick_shade = { 0, 0, 0 };
+      int size = (int)(s * 0.8f + 0.5f), outline = (int)(s * 1.05f + 0.5f);
+      float bx = fx + s - size * 0.35f, by = fy + s - size * 0.4f;
+      gpuui_shape(SHAPE_TICK, outline, outline, paint_tick, 0, bx - outline / 2.0f, by - outline / 2.0f,
+                  to_gpu(tick_shade, 0.85f));
+      gpuui_shape(SHAPE_TICK, size, size, paint_tick, 0, bx - size / 2.0f, by - size / 2.0f, to_gpu(tick_green, 1));
+    }
+    if (c == GFX_ICON_SAVE_ADD) { /* a green + on its lower right corner, as the new folder's */
+      static const rgb_t plus_green = { 0x5C, 0xD6, 0x5C }, plus_shade = { 0, 0, 0 };
+      int size = (int)(s * 0.62f + 0.5f), outline = (int)(s * 0.86f + 0.5f);
+      float bx = fx + s - size * 0.4f, by = fy + s - size * 0.4f;
+      gpuui_shape(SHAPE_PLUS, outline, outline, paint_cross, &directions[0], bx - outline / 2.0f, by - outline / 2.0f,
+                  to_gpu(plus_shade, 0.85f));
+      gpuui_shape(SHAPE_PLUS, size, size, paint_cross, &directions[0], bx - size / 2.0f, by - size / 2.0f,
+                  to_gpu(plus_green, 1));
+    }
+    return;
+  }
+  bool folder = GFX_ICON_WIDE(c);
+  if (folder || c == (unsigned char)GFX_ICON_LOCK) {
+    int sh = (int)(h * (folder ? 0.62f : 0.7f) + 0.5f);
+    int sw = folder ? (int)(sh * 1.3f + 0.5f) : (int)(sh * 0.78f + 0.5f);
+    float fx = x + (w - sw) / 2.0f, fy = y + (h - sh) / 2.0f;
+    gpuui_shape(folder ? SHAPE_FOLDER : SHAPE_LOCK, sw, sh, folder ? paint_folder : paint_lock, 0, fx, fy,
                 to_gpu(colour, 1));
+    static const rgb_t green = { 0x5C, 0xD6, 0x5C }, red = { 0xF0, 0x4A, 0x4A }, shade = { 0, 0, 0 };
+    if (c == GFX_ICON_FOLDER_UP) { /* a green ^ on its lower right corner, on a dark one a little bigger */
+      float size = sh * 0.7f, bx = fx + sw - size * 0.5f, by = fy + sh - size * 0.4f;
+      chevron(UP, sh * 0.95f, bx, by, to_gpu(shade, 0.85f));
+      chevron(UP, size, bx, by, to_gpu(green, 1));
+    }
+    if (c == GFX_ICON_FOLDER_ADD || c == GFX_ICON_FOLDER_REMOVE) { /* its badge on the lower right corner */
+      bool add = c == GFX_ICON_FOLDER_ADD;
+      int size = (int)(sh * 0.62f + 0.5f), outline = (int)(sh * 0.86f + 0.5f);
+      float bx = fx + sw - size * 0.55f, by = fy + sh - size * 0.55f; /* its middle */
+      /* a dark one a little bigger under it, so it stands out from the folder */
+      gpuui_shape(add ? SHAPE_PLUS : SHAPE_CROSS, outline, outline, paint_cross, add ? &directions[0] : 0,
+                  bx - outline / 2.0f, by - outline / 2.0f, to_gpu(shade, 0.85f));
+      gpuui_shape(add ? SHAPE_PLUS : SHAPE_CROSS, size, size, paint_cross, add ? &directions[0] : 0,
+                  bx - size / 2.0f, by - size / 2.0f, to_gpu(add ? green : red, 1));
+    }
     return;
   }
   if (!legacy)

@@ -752,7 +752,7 @@ static uint8_t sprite_pixel(unsigned char c, int sprite_x, int tile_row, int sty
   }
   if (sprite_x >= ICON_SIZE)
     return 0;
-  if (c == GFX_ICON_FOLDER) { /* selected: in the highlight colour */
+  if (GFX_ICON_WIDE(c)) { /* the folder (gz's art has no badges); selected: in the highlight colour */
     char k = icon_folder[tile_row][sprite_x];
     if (k < 'C' || k > 'F')
       return 0;
@@ -778,6 +778,12 @@ static inline bool is_sprite(unsigned char c)
     case GFX_CHECK_ON:
     case GFX_ICON_REMOVE:
     case GFX_ICON_FOLDER:
+    case GFX_ICON_FOLDER_ADD:
+    case GFX_ICON_FOLDER_REMOVE:
+    case GFX_ICON_FOLDER_UP:
+    case GFX_ICON_SAVE:
+    case GFX_ICON_SAVE_HERE:
+    case GFX_ICON_SAVE_ADD:
     case GFX_ICON_WRENCH:
     case GFX_ICON_UP:
     case GFX_ICON_DOWN:

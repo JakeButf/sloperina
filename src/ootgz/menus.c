@@ -1833,7 +1833,7 @@ static void watch_press(menu_item_t *it, int part)
       break;
     }
     case PART_LABEL:
-      osk_open("label", entry->label[0] ? entry->label : label, OSK_MAX, watch_renamed, index);
+      osk_open("watch label", entry->label[0] ? entry->label : label, OSK_MAX, watch_renamed, index);
       break;
     case PART_UP:
     case PART_DOWN:
@@ -2722,6 +2722,16 @@ static void set_save_backup_location(menu_item_t *it, bool on)
 
 static const char *const save_kind_names[] = { "autosaves", "hard saves", "both" };
 
+static bool get_hard_numbered(menu_item_t *it)
+{
+  return save_backup_hard_numbered;
+}
+
+static void set_hard_numbered(menu_item_t *it, bool on)
+{
+  save_backup_hard_numbered = on;
+}
+
 static int get_save_kinds(menu_item_t *it)
 {
   return save_backup_kinds;
@@ -2776,10 +2786,11 @@ static int32_t max_archive_number(menu_item_t *it)
 /* save management > manage archives: a small folder browser. Its two folders: named archives (save-archives/,
  * with folders of its own to make, open, delete, and choose as where archive now puts them) and automatic
  * archives (save-backups/). L on an archive opens it: restore or delete, each L then L again. */
-static menu_t m_manage, m_named, m_automatic, m_archive;
+static menu_t m_manage, m_named, m_automatic, m_archive, m_delete_folder;
+static int named_count, named_folders; /* what the folder looked at holds (its last list) */
 static int archive_open = -1;  /* the archive m_archive is for: its index in the list */
 static int archive_armed = -1; /* the action armed by a first L: ARCHIVE_* */
-enum { ARCHIVE_RESTORE, ARCHIVE_DELETE, ARCHIVE_DELETE_FOLDER };
+enum { ARCHIVE_RESTORE, ARCHIVE_DELETE };
 
 static void fill_named(void);
 static void fill_automatic(void);
@@ -2909,67 +2920,155 @@ static void act_archive_here(menu_item_t *it)
   savebackup_archive_here();
 }
 
-static void text_archive_here(menu_item_t *it, char *buf, int len)
+static void archived_into_folder(const char *text, intptr_t ctx)
 {
-  const char *a = savebackup_archive_folder(), *b = savebackup_browsing();
-  while (*a && *a == *b)
-    a++, b++;
-  bool here = *a == *b;
-  snprintf(buf, len, "%s", here ? T("(they go here now)") : "");
+  savebackup_archive_here_now(text);
+  fill_named(); /* the new archive in the list */
 }
 
-static void text_delete_folder(menu_item_t *it, char *buf, int len)
+/* archive now, from the folder's buttons: into the folder looked at */
+static void act_archive_into_folder(menu_item_t *it)
 {
-  armed_text(&m_named, it, ARCHIVE_DELETE_FOLDER, "delete this folder", "L again: delete this folder and all in it",
-             buf, len);
+  osk_open("archive name", savebackup_location_name(), SAVE_ARCHIVE_NAME_MAX, archived_into_folder, 0);
+}
+
+/* delete this folder: a screen of its own, the warning and no / yes, no first (back: no) */
+#define DELETE_NO_ITEM 4 /* m_delete_folder's: three lines of warning, a blank, then no */
+
+static void text_delete_warning(menu_item_t *it, char *buf, int len)
+{
+  char where[SAVE_FOLDER_LEN + 16];
+  int archives = named_count - named_folders;
+  switch (it->data) {
+    case 0:
+      folder_text(where, sizeof(where), savebackup_browsing());
+      snprintf(buf, len, TF("delete %s"), where);
+      break;
+    case 1:
+      snprintf(buf, len, TF("and everything in it: %d archive%s, %d folder%s (with what they hold)"), archives,
+               archives == 1 ? "" : "s", named_folders, named_folders == 1 ? "" : "s");
+      break;
+    default:
+      snprintf(buf, len, "%s", T("this can't be undone"));
+      break;
+  }
+}
+
+static void act_delete_no(menu_item_t *it)
+{
+  gfx_logf("%s", T("folder kept"));
+  menu_goto(&m_named);
+}
+
+static void act_delete_yes(menu_item_t *it)
+{
+  savebackup_delete_folder(); /* then up a folder, or (failed) still on it; its notice says which */
+  fill_named();
+  m_named.selected = 0;
+  menu_refresh(&m_named);
+  menu_goto(&m_named);
 }
 
 static void act_delete_folder(menu_item_t *it)
 {
-  if (second_press(ARCHIVE_DELETE_FOLDER) && savebackup_delete_folder())
-    fill_named();
+  m_delete_folder.selected = DELETE_NO_ITEM;
+  menu_goto(&m_delete_folder);
+}
+
+/* the folder's buttons, one row of icons (as the watches' folder and +), each said in the hint: up a folder,
+ * new folder, save new archives here, delete this folder (up and delete not at the top). Picked with
+ * left/right, pressed with select. */
+enum { FOLDER_UP, FOLDER_NEW, FOLDER_ARCHIVE, FOLDER_HERE, FOLDER_DELETE, FOLDER_BUTTONS };
+static int folder_buttons[FOLDER_BUTTONS], n_folder_buttons;
+static const char *folder_hints[FOLDER_BUTTONS];
+static const char *const folder_button_hint[FOLDER_BUTTONS] = {
+  [FOLDER_UP] = "up a folder: to the one this is in",
+  [FOLDER_NEW] = "new folder: L names a folder, made in this one",
+  [FOLDER_ARCHIVE] = "archive now: L names it, then copies the save into this folder (its next number)",
+  [FOLDER_HERE] = "save new archives here: L, and archive now and numbered hard saves put them in this folder",
+  [FOLDER_DELETE] = "delete this folder: asks first, then deletes it and every archive and folder in it",
+};
+static const char *const here_now_hint = "save new archives here: they go here now";
+static const char folder_icons[FOLDER_BUTTONS] = {
+  [FOLDER_UP] = GFX_ICON_FOLDER_UP, [FOLDER_NEW] = GFX_ICON_FOLDER_ADD, [FOLDER_ARCHIVE] = GFX_ICON_SAVE_ADD,
+  [FOLDER_HERE] = GFX_ICON_SAVE,
+  [FOLDER_DELETE] = GFX_ICON_FOLDER_REMOVE,
+};
+
+/* new archives go to the folder looked at */
+static bool archives_go_here(void)
+{
+  const char *a = savebackup_archive_folder(), *b = savebackup_browsing();
+  while (*a && *a == *b)
+    a++, b++;
+  return *a == *b;
+}
+
+static void folder_row_text(menu_item_t *it, char *buf, int len)
+{
+  int n = 0;
+  bool here = archives_go_here();
+  for (int i = 0; i < n_folder_buttons && n + 4 < len; i++) {
+    int button = folder_buttons[i];
+    folder_hints[i] = button == FOLDER_HERE && here ? here_now_hint : folder_button_hint[button];
+    char icon = button == FOLDER_HERE && here ? GFX_ICON_SAVE_HERE : folder_icons[button];
+    n += snprintf(buf + n, len - n, "%s%c%c", i ? " " : "", icon, GFX_WIDE_REST);
+  }
+  it->hint = n_folder_buttons == 1 ? folder_hints[0] : 0; /* one button: no parts, its hint is the item's */
+}
+
+static bool folder_row_cursor(menu_item_t *it, const char *line, int *start, int *len)
+{
+  *start = 3 * (it->part < n_folder_buttons ? it->part : 0); /* each two cells and a space */
+  *len = 2;
+  return true;
+}
+
+static void folder_row_press(menu_item_t *it, int part)
+{
+  switch (part < n_folder_buttons ? folder_buttons[part] : FOLDER_NEW) {
+    case FOLDER_UP: act_folder_up(it); break;
+    case FOLDER_ARCHIVE: act_archive_into_folder(it); break;
+    case FOLDER_HERE: act_archive_here(it); break;
+    case FOLDER_DELETE: act_delete_folder(it); break;
+    default: act_new_folder(it); break;
+  }
 }
 
 /* the folder looked at: where it is; what to do with it; then what's in it */
 static void fill_named(void)
 {
   int n = savebackup_list_named(), folders = savebackup_list_folders();
+  named_count = n, named_folders = folders;
   bool top = !savebackup_browsing()[0];
   archive_armed = -1;
   menu_reset(&m_named);
   menu_item_t *path = menu_add_text(&m_named, text_named_path, 0);
   if (path)
     path->plain = true;
-  menu_add_heading(&m_named, "this folder");
-  menu_item_t *add = menu_add_action(&m_named, "new folder", act_new_folder, 0);
-  if (add) {
-    add->icon = GFX_ICON_FOLDER;
-    add->hint = "L: name a new folder, made in this one";
-    add->log_label = "";
-  }
-  menu_item_t *here = menu_add_action(&m_named, "save new archives here", act_archive_here, 0);
-  if (here) {
-    here->text = text_archive_here;
-    here->hint = "L: archive now puts new archives in this folder (numbered from its highest)";
-    here->log_label = "";
-  }
-  if (!top) {
-    menu_item_t *del = menu_add_action(&m_named, "", act_delete_folder, 0);
-    if (del) {
-      del->text = text_delete_folder;
-      del->hint = "L, then L again: delete this folder from the SD card, with every archive and folder in it";
-      del->log_label = "";
-    }
+  n_folder_buttons = 0;
+  if (!top)
+    folder_buttons[n_folder_buttons++] = FOLDER_UP;
+  folder_buttons[n_folder_buttons++] = FOLDER_NEW;
+  folder_buttons[n_folder_buttons++] = FOLDER_ARCHIVE;
+  folder_buttons[n_folder_buttons++] = FOLDER_HERE;
+  if (!top)
+    folder_buttons[n_folder_buttons++] = FOLDER_DELETE;
+  menu_item_t *buttons = menu_add_action(&m_named, "", 0, 0);
+  if (buttons) {
+    buttons->text = folder_row_text;
+    buttons->cursor = folder_row_cursor;
+    buttons->press = folder_row_press;
+    buttons->n_parts = n_folder_buttons;
+    buttons->part = top ? 0 : 1; /* on new folder */
+    buttons->part_hints = folder_hints;
+    buttons->grid = true; /* the icons on gz's grid, so the cursor's columns are theirs */
+    buttons->log_label = "";
+    for (int i = 0; i < n_folder_buttons; i++)
+      folder_hints[i] = folder_button_hint[folder_buttons[i]];
+    buttons->hint = folder_hints[0];
   }
   menu_add_heading(&m_named, "in it");
-  if (!top) {
-    menu_item_t *up = menu_add_action(&m_named, "..", act_folder_up, 0);
-    if (up) {
-      up->icon = GFX_ICON_FOLDER;
-      up->hint = "L: up to the folder this one is in";
-      up->log_label = "";
-    }
-  }
   for (int i = 0; i < n; i++) {
     menu_item_t *row = menu_add_action(&m_named, "", act_named_entry, i);
     if (!row)
@@ -2987,6 +3086,10 @@ static void fill_named(void)
     menu_add_text(&m_named, text_empty_folder, 0);
   menu_end_group(&m_named);
   menu_add_return(&m_named);
+  /* the folder's path and buttons stay at the top and its return at the bottom; what's in it scrolls between,
+   * with the list's scroll bar beside it */
+  m_named.pinned = 3; /* the path, the buttons, "in it" */
+  m_named.pinned_end = 1;
   m_named.scroll = 0;
   menu_refresh(&m_named);
 }
@@ -3016,6 +3119,8 @@ static void fill_automatic(void)
   if (!n)
     menu_add_text(&m_automatic, text_empty_folder, 0);
   menu_add_return(&m_automatic);
+  m_automatic.pinned = 1; /* its line at the top, its return at the bottom; the archives scroll between */
+  m_automatic.pinned_end = 1;
   m_automatic.scroll = 0;
   menu_refresh(&m_automatic);
 }
@@ -3053,6 +3158,25 @@ static void act_open_archives(menu_item_t *it)
 
 static void build_archive_menus(void)
 {
+  menu_init(&m_delete_folder, "delete this folder?", 8);
+  m_delete_folder.parent = &m_named; /* back: no */
+  for (int line = 0; line < 3; line++) {
+    menu_item_t *warning = menu_add_text(&m_delete_folder, text_delete_warning, line);
+    if (warning)
+      warning->plain = true;
+  }
+  add_blank_line(&m_delete_folder);
+  menu_item_t *no = menu_add_action(&m_delete_folder, "no, keep it", act_delete_no, 0);
+  if (no) {
+    no->hint = "L: back to the folder, nothing deleted";
+    no->log_label = "";
+  }
+  menu_item_t *yes = menu_add_action(&m_delete_folder, "yes, delete it", act_delete_yes, 0);
+  if (yes) {
+    yes->hint = "L: delete the folder and everything in it from the SD card";
+    yes->log_label = "";
+  }
+
   menu_init(&m_manage, "manage archives", 5);
   m_manage.parent = &m_save_backups;
   menu_item_t *named = menu_add_action(&m_manage, "named archives", act_open_named, 0);
@@ -3098,29 +3222,51 @@ static void build_archive_menus(void)
   menu_add_return(&m_archive);
 }
 
-static void build_save_backups(void)
+/* save management > automatic save archive: the copies made after the game's saves */
+static menu_t m_auto_archive;
+
+static void build_auto_archive(void)
 {
-  menu_init(&m_save_backups, "save management", 12);
-  menu_add_heading(&m_save_backups, "automatic save archive");
-  menu_item_t *backups = menu_add_check(&m_save_backups, "enable", get_save_backups, set_save_backups, 0);
+  menu_init(&m_auto_archive, "automatic save archive", 7);
+  menu_add_heading(&m_auto_archive, "automatic save archive options");
+  menu_item_t *backups = menu_add_check(&m_auto_archive, "enable", get_save_backups, set_save_backups, 0);
   if (backups) {
     backups->hint = "after a save, copy the game's save folder to save-backups/ on the SD card (the newest 100 kept)";
     backups->log_label = "automatic save archive:";
   }
-  menu_item_t *kinds = menu_add_option(&m_save_backups, "back up option", ARRAY_LEN(save_kind_names),
+  menu_item_t *kinds = menu_add_option(&m_auto_archive, "back up option", ARRAY_LEN(save_kind_names),
                                        save_kind_names, get_save_kinds, set_save_kinds, 0);
   if (kinds) {
     kinds->indent = 2; /* under enable */
     kinds->hint = "autosaves (loading zones, events), hard saves (the save screen), or both";
     kinds->log_label = "automatic save archive of";
   }
-  menu_item_t *where = menu_add_check(&m_save_backups, "location in folder name", get_save_backup_location,
+  menu_item_t *numbered = menu_add_check(&m_auto_archive, "hard saves numbered", get_hard_numbered,
+                                         set_hard_numbered, 0);
+  if (numbered) {
+    numbered->indent = 2;
+    numbered->hint = "each hard save becomes the next \"#008 - <location> - <date>\" where new archives go (as "
+                     "archive now); off: dated, with the autosaves";
+    numbered->log_label = "hard saves numbered:";
+  }
+  menu_item_t *where = menu_add_check(&m_auto_archive, "location in folder name", get_save_backup_location,
                                       set_save_backup_location, 0);
   if (where) {
     where->indent = 2;
-    where->hint = "add the save's location after the date in the folder name, e.g. \"<date> - Temple of Time\"";
+    where->hint = "the dated ones: the save's location after the date, e.g. \"<date> - Temple of Time\"";
     where->log_label = "location in folder name:";
   }
+  menu_end_group(&m_auto_archive);
+  menu_add_return(&m_auto_archive);
+}
+
+static void build_save_backups(void)
+{
+  menu_init(&m_save_backups, "save management", 10);
+  build_auto_archive();
+  menu_item_t *automatic = menu_add_submenu(&m_save_backups, "automatic save archive", &m_auto_archive);
+  if (automatic)
+    automatic->hint = "the copies made after each of the game's saves: on, which saves, numbered hard saves";
   menu_add_heading(&m_save_backups, "save archives");
   menu_item_t *manage = menu_add_action(&m_save_backups, "manage archives >", act_open_archives, 0);
   if (manage) {

@@ -29,7 +29,11 @@
  *     colour, with gz's green tick when on
  *   GFX_ICON_REMOVE: the red cross of a watch row (list_icons.png), one cell
  *   GFX_ICON_FOLDER: the yellow folder (file_icons.png), two cells
- *   GFX_ICON_WRENCH: the wrench of a watch row, "edit in memory" (wrench.png), one cell */
+ *   GFX_ICON_WRENCH: the wrench of a watch row, "edit in memory" (wrench.png), one cell
+ *   GFX_ICON_FOLDER_ADD / _REMOVE / _UP: the folder with a green + / red x / green ^ on its corner (new folder,
+ *     delete a folder, up a folder), two cells (the game's style; gz's draws the folder)
+ *   GFX_ICON_SAVE / _SAVE_HERE / _SAVE_ADD: a floppy disk (save new archives here), _HERE with a green tick (they
+ *     go here), _ADD with a green + (archive now), two cells (the game's style; gz's draws the folder) */
 #define GFX_CHECK_OFF '\x01'
 #define GFX_CHECK_ON '\x02'
 #define GFX_WIDE_REST '\x03'
@@ -42,6 +46,15 @@
 #define GFX_ICON_RIGHT '\x0B' /* arrow_icons.png tiles 2 and 3 (0x0A is the newline, so skipped) */
 #define GFX_ICON_LEFT '\x0C'
 #define GFX_ICON_LOCK '\x80' /* single-cell padlock; 0x7F is reserved for invisible panel sizing */
+#define GFX_ICON_FOLDER_ADD '\x10'
+#define GFX_ICON_FOLDER_REMOVE '\x11'
+#define GFX_ICON_FOLDER_UP '\x12'
+#define GFX_ICON_SAVE '\x13'
+#define GFX_ICON_SAVE_HERE '\x14'
+#define GFX_ICON_SAVE_ADD '\x15'
+#define GFX_ICON_WIDE(c)                                                                                           \
+  ((c) == GFX_ICON_FOLDER || (c) == GFX_ICON_FOLDER_ADD || (c) == GFX_ICON_FOLDER_REMOVE ||                        \
+   (c) == GFX_ICON_FOLDER_UP || (c) == GFX_ICON_SAVE || (c) == GFX_ICON_SAVE_HERE || (c) == GFX_ICON_SAVE_ADD)
 /* the game's picture of an item (the game's style only, nativeui.c): two cells, GFX_PICTURE then its
  * number (gameimage.h's GAMEPIC_*) as GFX_PICTURE_ID(n) */
 #define GFX_PICTURE '\x0E'

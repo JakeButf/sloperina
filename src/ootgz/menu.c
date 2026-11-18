@@ -463,7 +463,7 @@ void menu_item_line(menu_item_t *item, char *buf, int len)
     item_line(item, buf, len);
     return;
   }
-  bool wide_icon = item->icon == GFX_ICON_FOLDER; /* two cells: followed by GFX_WIDE_REST ("\x03") */
+  bool wide_icon = GFX_ICON_WIDE(item->icon); /* two cells: followed by GFX_WIDE_REST ("\x03") */
   char rest[96];
   item_line(item, rest, sizeof(rest));
   snprintf(buf, len, "%c%s %s", item->icon, wide_icon ? "\x03" : "", rest);
@@ -844,16 +844,24 @@ static void measure_menu(menu_t *menu)
   measure_hints(menu, measured.wrap_w, &measured.hint_rows, &measured.hint_w);
 }
 
-/* Keeps the selection in view in the scrolling rows (those under the pinned ones). */
-static void update_scroll(menu_t *menu, int pinned, int visible)
+/* Keeps the selection in view in the scrolling rows (those under the pinned ones, before item `end`: the ones
+ * pinned at the end show anyway). */
+static void update_scroll(menu_t *menu, int pinned, int visible, int end)
 {
+  if (menu->selected >= end) { /* on an item pinned at the end: only kept in range */
+    if (menu->scroll > end - visible)
+      menu->scroll = end - visible > pinned ? end - visible : pinned;
+    if (menu->scroll < pinned)
+      menu->scroll = pinned;
+    return;
+  }
   /* headings and text just above the cursor come into view with it (they can't be selected, so
    * the cursor alone would never scroll back to a heading at the top) */
   int top = menu->selected;
   while (top > pinned && !selectable(&menu->items[top - 1]) && menu->selected - (top - 1) < visible)
     top--;
   /* and the same below it: the read-only lines under a menu's return */
-  int n_list = menu->n_items - menu->footer;
+  int n_list = end;
   int bottom = menu->selected;
   while (bottom + 1 < n_list && !selectable(&menu->items[bottom + 1]) && bottom + 1 - top < visible)
     bottom++;
@@ -980,7 +988,13 @@ void menu_draw(void)
   if (menu->pinned > 0 && menu->pinned < n_list && visible - menu->pinned >= MIN_SCROLL_ROWS)
     pinned = menu->pinned;
   visible -= pinned;
-  update_scroll(menu, pinned, visible);
+  /* the last `pinned_end` of the list stay under the rows that scroll (if a few rows are left to scroll) */
+  int pinned_end = 0;
+  if (menu->pinned_end > 0 && menu->pinned_end < n_list - pinned && visible - menu->pinned_end >= MIN_SCROLL_ROWS)
+    pinned_end = menu->pinned_end;
+  visible -= pinned_end;
+  int end = n_list - pinned_end; /* the rows that scroll end before this item */
+  update_scroll(menu, pinned, visible, end);
 
   gfx_begin();
   for (int k = 0; k < title_rows; k++) {
@@ -990,10 +1004,10 @@ void menu_draw(void)
   gfx_row(first_item_y - 1, GFX_ROW_GAP);
   for (int row = 0; row < pinned + visible; row++) {
     int index = row < pinned ? row : menu->scroll + row - pinned;
-    if (index >= n_list)
+    if (index >= end)
       break;
     /* a heading never ends the list: with nothing of its group under it, its row stays empty */
-    if (row == pinned + visible - 1 && index + 1 < n_list && menu->items[index].text == heading_text) {
+    if (row == pinned + visible - 1 && index + 1 < end && menu->items[index].text == heading_text) {
       gfx_row(first_item_y + row, GFX_ROW_LINE);
       break;
     }
@@ -1005,17 +1019,17 @@ void menu_draw(void)
   }
   if (menu->scroll > pinned)
     gfx_text(0, first_item_y + pinned, GFX_DIM, "^");
-  if (menu->scroll + visible < n_list)
+  if (menu->scroll + visible < end)
     gfx_text(0, first_item_y + pinned + visible - 1, GFX_DIM, "v");
   /* the game's style draws a scroll bar, in every menu alike: over the rows that scroll, or (a list that fits) over
    * its rows, the thumb then filling it */
-  int scrolling = n_list - pinned;
+  int scrolling = end - pinned;
   gfx_scroll(first_item_y + pinned, scrolling < visible ? scrolling : visible, scrolling, menu->scroll - pinned);
   if (menu->inner_rows > 0) { /* the list inside: its bar over the part of its rows on screen */
     int from = -1, to = -1;
     for (int row = 0; row < pinned + visible; row++) {
       int index = row < pinned ? row : menu->scroll + row - pinned;
-      if (index >= n_list)
+      if (index >= end)
         break;
       if (index >= menu->inner_first && index < menu->inner_first + menu->inner_rows) {
         from = from < 0 ? row : from;
@@ -1030,8 +1044,16 @@ void menu_draw(void)
    * rows are always there, and the width is the widest line or hint of any item, not just the
    * visible ones. */
   static const char filler[2] = { FILLER_CHAR, 0 };
-  int scrolled_shown = n_list - menu->scroll < visible ? n_list - menu->scroll : visible;
+  int scrolled_shown = end - menu->scroll < visible ? end - menu->scroll : visible;
   int list_end = first_item_y + pinned + scrolled_shown;
+  for (int k = 0; k < pinned_end; k++, list_end++) { /* the end's items, right under the rows that scroll */
+    int index = end + k;
+    draw_item(menu, index, list_end);
+    gfx_row(list_end, row_kind(&menu->items[index]));
+    char shown[GFX_VALUE_LEN], widest[GFX_VALUE_LEN];
+    if (item_value(&menu->items[index], shown, widest, sizeof(shown)))
+      gfx_row_value(list_end, shown, widest);
+  }
   if (footer) { /* a blank, then the lines under the list */
     gfx_row(list_end, GFX_ROW_GAP);
     for (int k = 0; k < footer; k++) {

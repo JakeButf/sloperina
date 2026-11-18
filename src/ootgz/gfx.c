@@ -356,6 +356,12 @@ static char plain_char(char ch)
     case GFX_CHECK_ON: return 'x';
     case GFX_ICON_REMOVE: return '-';
     case GFX_ICON_FOLDER: return '+';
+    case GFX_ICON_FOLDER_ADD: return '+';
+    case GFX_ICON_FOLDER_REMOVE: return '-';
+    case GFX_ICON_FOLDER_UP: return '^';
+    case GFX_ICON_SAVE:
+    case GFX_ICON_SAVE_HERE:
+    case GFX_ICON_SAVE_ADD: return 'S';
     case GFX_ICON_WRENCH: return '*';
     case GFX_ICON_UP: return '^';
     case GFX_ICON_DOWN: return 'v';
