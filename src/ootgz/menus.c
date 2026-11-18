@@ -11,7 +11,9 @@
 #include "flaglog.h"
 #include "savebackup.h"
 #include "memview.h"
+#include "binds.h"
 #include "osk.h"
+#include "swkbd.h"
 #include "build_info.h" /* made by the Makefile: BUILD_WHEN, BUILD_VERSION */
 #include "age.h"
 #include "gfx.h"
@@ -430,12 +432,16 @@ static void build_link(void)
   menu_item_t *reload = menu_add_action(&m_link, "reload map", act_reload_map, 0);
   if (reload)
     reload->hint = "L: reload this map at the age above";
-  menu_item_t *save = menu_add_action(&m_link, "save position (R + d-up)", act_save_position, 0);
-  if (save)
+  menu_item_t *save = menu_add_action(&m_link, "save position ({savepos})", act_save_position, 0);
+  if (save) {
     save->hint = "L: remember where Link is and which way he faces";
-  menu_item_t *load = menu_add_action(&m_link, "load position (R + d-down)", act_load_position, 0);
-  if (load)
+    save->log_label = "save position";
+  }
+  menu_item_t *load = menu_add_action(&m_link, "load position ({loadpos})", act_load_position, 0);
+  if (load) {
     load->hint = "L: put Link back there (same map only)";
+    load->log_label = "load position";
+  }
   menu_item_t *lock_x = menu_add_check(&m_link, "lock X", get_lock_x, set_lock_x, 0);
   if (lock_x)
     lock_x->hint = "Hold Link's X (map North/South) where he is; off after a map change";
@@ -445,9 +451,11 @@ static void build_link(void)
   menu_item_t *lock_z = menu_add_check(&m_link, "lock Z", get_lock_z, set_lock_z, 0);
   if (lock_z)
     lock_z->hint = "Hold Link's Z (map East/West) where he is; off after a map change";
-  menu_item_t *ragdoll = menu_add_check(&m_link, "ragdoll (R3)", get_ragdoll, set_ragdoll, 0);
-  if (ragdoll)
+  menu_item_t *ragdoll = menu_add_check(&m_link, "ragdoll ({ragdoll})", get_ragdoll, set_ragdoll, 0);
+  if (ragdoll) {
     ragdoll->hint = "knock Link over, as a bomb does; he gets up by himself";
+    ragdoll->log_label = "ragdoll:";
+  }
   menu_add_return(&m_link);
   /* what can only be read, under return after a blank line */
   add_blank_line(&m_link);
@@ -1598,14 +1606,13 @@ static bool move_panel(menu_item_t *it)
   if (gfx_custom_y[panel] >= 0 &&
       (gfx_custom_y[panel] - *y > WATCHES_ROUNDING || *y - gfx_custom_y[panel] > WATCHES_ROUNDING))
     *y = gfx_custom_y[panel];
-  if (input_pressed() & BTN_L) {
+  if (cmd_pressed(CMD_SELECT)) {
     move_held = 0;
     gfx_logf("%s", movers[it->data].done);
     return false;
   }
-  uint32_t held = input_held();
-  int dx = !!(held & BTN_DRIGHT) - !!(held & BTN_DLEFT);
-  int dy = !!(held & BTN_DDOWN) - !!(held & BTN_DUP);
+  int dx = cmd_held(CMD_RIGHT) - cmd_held(CMD_LEFT);
+  int dy = cmd_held(CMD_DOWN) - cmd_held(CMD_UP);
   move_held = dx || dy ? move_held + 1 : 0;
   int step = glide_step(move_held);
   *x = clamp_int(*x + dx * step, 0, WATCHES_POS_MAX);
@@ -1826,7 +1833,7 @@ static void watch_press(menu_item_t *it, int part)
       break;
     }
     case PART_LABEL:
-      osk_open("label", entry->label[0] ? entry->label : label, watch_renamed, index);
+      osk_open("label", entry->label[0] ? entry->label : label, OSK_MAX, watch_renamed, index);
       break;
     case PART_UP:
     case PART_DOWN:
@@ -1951,22 +1958,22 @@ static const char *const cancel_hint = "L: cancel, no watch added";
 
 static bool custom_watch_edit(menu_item_t *it)
 {
-  if (input_repeat(BTN_DLEFT)) {
+  if (cmd_repeat(CMD_LEFT)) {
     custom_digit = custom_digit > CUSTOM_CANCEL ? custom_digit - 1 : CUSTOM_CANCEL;
-  } else if (input_repeat(BTN_DRIGHT)) {
+  } else if (cmd_repeat(CMD_RIGHT)) {
     custom_digit = custom_digit < CUSTOM_DIGITS - 1 ? custom_digit + 1 : CUSTOM_DIGITS - 1;
-  } else if (custom_digit == CUSTOM_CANCEL && (input_pressed() & BTN_L)) {
+  } else if (custom_digit == CUSTOM_CANCEL && cmd_pressed(CMD_SELECT)) {
     gfx_logf("custom watch cancelled");
     return false;
   } else if (custom_digit == CUSTOM_CANCEL) {
     /* on the x: nothing to change */
-  } else if (input_repeat(BTN_DUP) || input_repeat(BTN_DDOWN)) {
+  } else if (cmd_repeat(CMD_UP) || cmd_repeat(CMD_DOWN)) {
     int shift = (CUSTOM_DIGITS - 1 - custom_digit) * 4;
-    int dir = input_repeat(BTN_DUP) ? 1 : -1;
+    int dir = cmd_repeat(CMD_UP) ? 1 : -1;
     /* the digit goes round, f <-> 0, without carrying into the next */
     uintptr_t digit = ((custom_addr >> shift & 0xF) + (uintptr_t)(dir + 16)) & 0xF;
     custom_addr = (custom_addr & ~((uintptr_t)0xF << shift)) | digit << shift;
-  } else if (input_pressed() & BTN_L) {
+  } else if (cmd_pressed(CMD_SELECT)) {
     if (watch_add_memory(custom_addr, custom_type))
       gfx_logf("added watch %0*lx", CUSTOM_DIGITS, (unsigned long)custom_addr);
     else
@@ -2084,7 +2091,7 @@ static void fill_watches(void)
   menu_add_heading(&m_watches, "jump height");
   menu_item_t *reset_js = menu_add_action(&m_watches, "reset jump height", act_js_height_reset, 0);
   if (reset_js)
-    reset_js->hint = "L: set the threshold to maximum once (also R + A + d-right)";
+    reset_js->hint = "L: set the threshold to maximum once (also {reset_jump})";
   menu_item_t *lock_js = menu_add_check(&m_watches, "lock jump height", get_js_height_lock, set_js_height_lock, 0);
   if (lock_js)
     lock_js->hint = "Keep maximum height each frame; off after restarting";
@@ -2499,6 +2506,17 @@ static void set_lang(menu_item_t *it, int choice)
 /* input display */
 static const char *const input_style_names[] = { "row", "controller", "minimal" };
 static const char *const input_size_names[] = { "small", "medium", "large" };
+static const char *const input_attach_names[] = { "off", "above watches", "below watches" }; /* GFX_ATTACH_* */
+
+static int get_input_attach(menu_item_t *it)
+{
+  return input_attach;
+}
+
+static void set_input_attach(menu_item_t *it, int choice)
+{
+  input_attach = choice;
+}
 
 static bool get_input_display(menu_item_t *it)
 {
@@ -2638,7 +2656,6 @@ static void text_levitate(menu_item_t *it, char *buf, int len)
 }
 
 /* frame advance */
-static const char *const fa_button_names[] = { "L", "R" };
 
 static bool get_fa(menu_item_t *it)
 {
@@ -2680,7 +2697,7 @@ static void set_hide_over_item_wheel(menu_item_t *it, bool on)
   hide_over_item_wheel = on;
 }
 
-/* settings > save backups (savebackup.h) */
+/* save management (savebackup.h): the backups after each save, archives, restoring */
 static menu_t m_save_backups;
 
 static bool get_save_backups(menu_item_t *it)
@@ -2720,21 +2737,382 @@ static void text_save_backups(menu_item_t *it, char *buf, int len)
   savebackup_status_text(buf, len);
 }
 
+static void archive_named(const char *text, intptr_t ctx)
+{
+  savebackup_archive_now(text);
+}
+
+/* archive now's line: the folder it puts them in, unless it's save-archives/ itself */
+static void text_archive_now_to(menu_item_t *it, char *buf, int len)
+{
+  const char *folder = savebackup_archive_folder();
+  if (folder[0])
+    snprintf(buf, len, TF("to %s"), folder);
+  else
+    buf[0] = 0;
+}
+
+/* archive now: name it first (the location to start with), then copy */
+static void act_archive_now(menu_item_t *it)
+{
+  osk_open("archive name", savebackup_location_name(), SAVE_ARCHIVE_NAME_MAX, archive_named, 0);
+}
+
+static int32_t get_archive_number(menu_item_t *it)
+{
+  return savebackup_next_number();
+}
+
+static void set_archive_number(menu_item_t *it, int32_t v)
+{
+  savebackup_set_next_number(v);
+}
+
+static int32_t max_archive_number(menu_item_t *it)
+{
+  return SAVE_ARCHIVE_NUMBER_MAX;
+}
+
+/* save management > manage archives: a small folder browser. Its two folders: named archives (save-archives/,
+ * with folders of its own to make, open, delete, and choose as where archive now puts them) and automatic
+ * archives (save-backups/). L on an archive opens it: restore or delete, each L then L again. */
+static menu_t m_manage, m_named, m_automatic, m_archive;
+static int archive_open = -1;  /* the archive m_archive is for: its index in the list */
+static int archive_armed = -1; /* the action armed by a first L: ARCHIVE_* */
+enum { ARCHIVE_RESTORE, ARCHIVE_DELETE, ARCHIVE_DELETE_FOLDER };
+
+static void fill_named(void);
+static void fill_automatic(void);
+
+/* the folder's path, as it's shown: "save-archives/a/b" */
+static void folder_text(char *buf, int len, const char *rel)
+{
+  snprintf(buf, len, rel[0] ? "save-archives/%s" : "save-archives", rel); /* not menu text */
+}
+
+/* armed: the cursor still on it (else disarmed); its text with "L again: " before it */
+static bool armed_text(menu_t *m, menu_item_t *it, int action, const char *what, const char *armed_what, char *buf,
+                       int len)
+{
+  if (archive_armed == action && &m->items[m->selected] != it)
+    archive_armed = -1; /* the cursor moved off it */
+  char expanded[96];
+  snprintf(buf, len, "%s", binds_expand(T(archive_armed == action ? armed_what : what), expanded, sizeof(expanded)));
+  return archive_armed == action;
+}
+
+/* first L arms it, a second does it */
+static bool second_press(int action)
+{
+  if (archive_armed != action) {
+    archive_armed = action;
+    return false;
+  }
+  archive_armed = -1;
+  return true;
+}
+
+/* --- an archive: restore, delete --- */
+
+static void text_archive_name(menu_item_t *it, char *buf, int len)
+{
+  snprintf(buf, len, "%s", savebackup_archive_name(archive_open));
+}
+
+static void text_archive_action(menu_item_t *it, char *buf, int len)
+{
+  if (it->data == ARCHIVE_RESTORE)
+    armed_text(&m_archive, it, ARCHIVE_RESTORE, "restore", "L again: restore", buf, len);
+  else
+    armed_text(&m_archive, it, ARCHIVE_DELETE, "delete", "L again: delete", buf, len);
+}
+
+static void act_archive_action(menu_item_t *it)
+{
+  if (!second_press((int)it->data))
+    return;
+  menu_t *list = m_archive.parent;
+  if (it->data == ARCHIVE_RESTORE) {
+    if (savebackup_restore(archive_open)) {
+      menu_goto(&m_save_backups); /* done: back to save management */
+      return;
+    }
+  } else {
+    savebackup_delete(archive_open);
+  }
+  if (list == &m_named) /* the list has changed (or may have) */
+    fill_named();
+  else
+    fill_automatic();
+  menu_goto(list);
+}
+
+static void open_archive(menu_t *from, int i)
+{
+  archive_open = i;
+  archive_armed = -1;
+  m_archive.parent = from;
+  m_archive.selected = 1; /* restore */
+  menu_goto(&m_archive);
+}
+
+static void text_list_entry(menu_item_t *it, char *buf, int len)
+{
+  snprintf(buf, len, "%s", savebackup_archive_name((int)it->data));
+}
+
+static void text_empty_folder(menu_item_t *it, char *buf, int len)
+{
+  snprintf(buf, len, "%s", T("(empty)"));
+}
+
+/* --- named archives: a folder of them --- */
+
+static void text_named_path(menu_item_t *it, char *buf, int len)
+{
+  folder_text(buf, len, savebackup_browsing());
+}
+
+static void act_named_entry(menu_item_t *it)
+{
+  int i = (int)it->data;
+  if (i < savebackup_list_folders()) {
+    if (savebackup_browse_into(i)) {
+      fill_named();
+      m_named.selected = 0;
+      menu_refresh(&m_named);
+    }
+    return;
+  }
+  open_archive(&m_named, i);
+}
+
+static void act_folder_up(menu_item_t *it)
+{
+  savebackup_browse_up();
+  fill_named();
+}
+
+static void folder_named(const char *text, intptr_t ctx)
+{
+  if (savebackup_make_folder(text))
+    fill_named();
+}
+
+static void act_new_folder(menu_item_t *it)
+{
+  osk_open("folder name", "", SAVE_ARCHIVE_NAME_MAX, folder_named, 0);
+}
+
+static void act_archive_here(menu_item_t *it)
+{
+  savebackup_archive_here();
+}
+
+static void text_archive_here(menu_item_t *it, char *buf, int len)
+{
+  const char *a = savebackup_archive_folder(), *b = savebackup_browsing();
+  while (*a && *a == *b)
+    a++, b++;
+  bool here = *a == *b;
+  snprintf(buf, len, "%s", here ? T("(they go here now)") : "");
+}
+
+static void text_delete_folder(menu_item_t *it, char *buf, int len)
+{
+  armed_text(&m_named, it, ARCHIVE_DELETE_FOLDER, "delete this folder", "L again: delete this folder and all in it",
+             buf, len);
+}
+
+static void act_delete_folder(menu_item_t *it)
+{
+  if (second_press(ARCHIVE_DELETE_FOLDER) && savebackup_delete_folder())
+    fill_named();
+}
+
+/* the folder looked at: where it is; what to do with it; then what's in it */
+static void fill_named(void)
+{
+  int n = savebackup_list_named(), folders = savebackup_list_folders();
+  bool top = !savebackup_browsing()[0];
+  archive_armed = -1;
+  menu_reset(&m_named);
+  menu_item_t *path = menu_add_text(&m_named, text_named_path, 0);
+  if (path)
+    path->plain = true;
+  menu_add_heading(&m_named, "this folder");
+  menu_item_t *add = menu_add_action(&m_named, "new folder", act_new_folder, 0);
+  if (add) {
+    add->icon = GFX_ICON_FOLDER;
+    add->hint = "L: name a new folder, made in this one";
+    add->log_label = "";
+  }
+  menu_item_t *here = menu_add_action(&m_named, "save new archives here", act_archive_here, 0);
+  if (here) {
+    here->text = text_archive_here;
+    here->hint = "L: archive now puts new archives in this folder (numbered from its highest)";
+    here->log_label = "";
+  }
+  if (!top) {
+    menu_item_t *del = menu_add_action(&m_named, "", act_delete_folder, 0);
+    if (del) {
+      del->text = text_delete_folder;
+      del->hint = "L, then L again: delete this folder from the SD card, with every archive and folder in it";
+      del->log_label = "";
+    }
+  }
+  menu_add_heading(&m_named, "in it");
+  if (!top) {
+    menu_item_t *up = menu_add_action(&m_named, "..", act_folder_up, 0);
+    if (up) {
+      up->icon = GFX_ICON_FOLDER;
+      up->hint = "L: up to the folder this one is in";
+      up->log_label = "";
+    }
+  }
+  for (int i = 0; i < n; i++) {
+    menu_item_t *row = menu_add_action(&m_named, "", act_named_entry, i);
+    if (!row)
+      break;
+    row->text = text_list_entry;
+    row->log_label = "";
+    if (i < folders) {
+      row->icon = GFX_ICON_FOLDER;
+      row->hint = "L: open this folder";
+    } else {
+      row->hint = "L: restore or delete this archive";
+    }
+  }
+  if (!n)
+    menu_add_text(&m_named, text_empty_folder, 0);
+  menu_end_group(&m_named);
+  menu_add_return(&m_named);
+  m_named.scroll = 0;
+  menu_refresh(&m_named);
+}
+
+/* --- automatic archives --- */
+
+static void act_automatic_entry(menu_item_t *it)
+{
+  open_archive(&m_automatic, (int)it->data);
+}
+
+static void fill_automatic(void)
+{
+  int n = savebackup_list_automatic();
+  menu_reset(&m_automatic);
+  menu_item_t *path = menu_add_text(&m_automatic, text_static, (intptr_t) "save-backups, newest first");
+  if (path)
+    path->plain = true;
+  for (int i = 0; i < n; i++) {
+    menu_item_t *row = menu_add_action(&m_automatic, "", act_automatic_entry, i);
+    if (!row)
+      break;
+    row->text = text_list_entry;
+    row->hint = "L: restore or delete this archive";
+    row->log_label = "";
+  }
+  if (!n)
+    menu_add_text(&m_automatic, text_empty_folder, 0);
+  menu_add_return(&m_automatic);
+  m_automatic.scroll = 0;
+  menu_refresh(&m_automatic);
+}
+
+/* --- manage archives: its two folders --- */
+
+static void act_open_named(menu_item_t *it)
+{
+  savebackup_browse_top();
+  fill_named();
+  m_named.selected = 0;
+  menu_refresh(&m_named);
+  menu_goto(&m_named);
+}
+
+static void act_open_automatic(menu_item_t *it)
+{
+  fill_automatic();
+  m_automatic.selected = 0;
+  menu_refresh(&m_automatic);
+  menu_goto(&m_automatic);
+}
+
+static void text_archives_go(menu_item_t *it, char *buf, int len)
+{
+  char where[SAVE_FOLDER_LEN + 16];
+  folder_text(where, sizeof(where), savebackup_archive_folder());
+  snprintf(buf, len, TF("new archives go to: %s"), where);
+}
+
+static void act_open_archives(menu_item_t *it)
+{
+  menu_goto(&m_manage);
+}
+
+static void build_archive_menus(void)
+{
+  menu_init(&m_manage, "manage archives", 5);
+  m_manage.parent = &m_save_backups;
+  menu_item_t *named = menu_add_action(&m_manage, "named archives", act_open_named, 0);
+  if (named) {
+    named->icon = GFX_ICON_FOLDER;
+    named->hint = "L: open save-archives (archive now's, in folders of your own)";
+    named->log_label = "";
+  }
+  menu_item_t *automatic = menu_add_action(&m_manage, "automatic archives", act_open_automatic, 0);
+  if (automatic) {
+    automatic->icon = GFX_ICON_FOLDER;
+    automatic->hint = "L: open save-backups (the automatic ones after each save, the newest 100)";
+    automatic->log_label = "";
+  }
+  menu_add_return(&m_manage);
+  menu_add_text(&m_manage, text_archives_go, 0);
+  m_manage.footer = 1;
+
+  /* the list of a folder: its path, 2 headings, 3 actions, "..", what's in it, return */
+  menu_init(&m_named, "named archives", SAVE_ARCHIVES_LISTED + 9);
+  m_named.parent = &m_manage;
+  menu_init(&m_automatic, "automatic archives", SAVE_ARCHIVES_LISTED + 3);
+  m_automatic.parent = &m_manage;
+
+  menu_init(&m_archive, "archive", 5);
+  m_archive.parent = &m_named;
+  menu_item_t *name = menu_add_text(&m_archive, text_archive_name, 0);
+  if (name)
+    name->plain = true;
+  menu_item_t *restore = menu_add_action(&m_archive, "", act_archive_action, ARCHIVE_RESTORE);
+  if (restore) {
+    restore->text = text_archive_action;
+    restore->hint = "L, then L again: archive the save as it is, then put this one in its place (options kept); "
+                    "then load it from the game's Load screen";
+    restore->log_label = ""; /* savebackup.c logs it */
+  }
+  menu_item_t *del = menu_add_action(&m_archive, "", act_archive_action, ARCHIVE_DELETE);
+  if (del) {
+    del->text = text_archive_action;
+    del->hint = "L, then L again: delete this archive from the SD card (it can't be undone)";
+    del->log_label = "";
+  }
+  menu_add_return(&m_archive);
+}
+
 static void build_save_backups(void)
 {
-  menu_init(&m_save_backups, "save backups", 7);
-  menu_add_heading(&m_save_backups, "save backup options");
-  menu_item_t *backups = menu_add_check(&m_save_backups, "enabled", get_save_backups, set_save_backups, 0);
+  menu_init(&m_save_backups, "save management", 12);
+  menu_add_heading(&m_save_backups, "automatic save archive");
+  menu_item_t *backups = menu_add_check(&m_save_backups, "enable", get_save_backups, set_save_backups, 0);
   if (backups) {
     backups->hint = "after a save, copy the game's save folder to save-backups/ on the SD card (the newest 100 kept)";
-    backups->log_label = "save backups:";
+    backups->log_label = "automatic save archive:";
   }
-  menu_item_t *kinds = menu_add_option(&m_save_backups, "back up", ARRAY_LEN(save_kind_names), save_kind_names,
-                                       get_save_kinds, set_save_kinds, 0);
+  menu_item_t *kinds = menu_add_option(&m_save_backups, "back up option", ARRAY_LEN(save_kind_names),
+                                       save_kind_names, get_save_kinds, set_save_kinds, 0);
   if (kinds) {
-    kinds->indent = 2; /* under enabled */
+    kinds->indent = 2; /* under enable */
     kinds->hint = "autosaves (loading zones, events), hard saves (the save screen), or both";
-    kinds->log_label = "save backups of";
+    kinds->log_label = "automatic save archive of";
   }
   menu_item_t *where = menu_add_check(&m_save_backups, "location in folder name", get_save_backup_location,
                                       set_save_backup_location, 0);
@@ -2743,10 +3121,32 @@ static void build_save_backups(void)
     where->hint = "add the save's location after the date in the folder name, e.g. \"<date> - Temple of Time\"";
     where->log_label = "location in folder name:";
   }
+  menu_add_heading(&m_save_backups, "save archives");
+  menu_item_t *manage = menu_add_action(&m_save_backups, "manage archives >", act_open_archives, 0);
+  if (manage) {
+    manage->hint = "the archives on the SD card: restore one in place of the game's save, or delete it";
+    manage->log_label = "";
+  }
+  menu_item_t *now = menu_add_action(&m_save_backups, "archive now", act_archive_now, 0);
+  if (now) {
+    now->text = text_archive_now_to;
+    now->hint = "name it, then copy the save folder as the game last saved it to save-archives/ (never deleted)";
+    now->log_label = ""; /* savebackup_frame reports it */
+  }
+  menu_item_t *number = menu_add_number(&m_save_backups, "next number", get_archive_number, set_archive_number,
+                                        max_archive_number, 0, 0);
+  if (number) {
+    number->num_min = 1;
+    number->indent = 2; /* archive now's */
+    number->hint = "the next archive's #: one more than the highest so far, then up by one each time";
+    number->log_label = "next archive number";
+  }
   menu_end_group(&m_save_backups);
   menu_add_return(&m_save_backups);
   menu_add_text(&m_save_backups, text_save_backups, 0);
   m_save_backups.footer = 1;
+
+  build_archive_menus();
 }
 
 static bool get_pause_display(menu_item_t *it)
@@ -2759,46 +3159,30 @@ static void set_pause_display(menu_item_t *it, bool on)
   pause_display = on;
 }
 
-static int get_fa_button(menu_item_t *it)
-{
-  return frame_advance_button;
-}
-
-static void set_fa_button(menu_item_t *it, int button)
-{
-  frame_advance_button = button;
-}
-
 static void build_frame_advance(void)
 {
-  menu_init(&m_frame_advance, "frame advance", 6);
+  menu_init(&m_frame_advance, "frame advance", 5);
   menu_add_heading(&m_frame_advance, "frame advance options");
   menu_item_t *enabled = menu_add_check(&m_frame_advance, "enabled", get_fa, set_fa, 0);
   if (enabled) {
-    enabled->hint = "in game, tap the button: pause; tap: a frame; button + L3: run";
+    enabled->hint = "in game, tap {advance}: pause; tap: a frame; hold: frames; {run}: run (settings > rebind commands)";
     enabled->log_label = "frame advance";
   }
   menu_item_t *in_pause = menu_add_check(&m_frame_advance, "in pause screen", get_fa_in_pause, set_fa_in_pause, 0);
   if (in_pause) {
-    in_pause->hint = "lets the button start frame advance in the game's pause screen (off: the game gets it)";
+    in_pause->hint = "lets {advance} start frame advance in the game's pause screen (off: the game gets it)";
     in_pause->log_label = "frame advance in pause screen";
   }
   menu_item_t *pause_icon = menu_add_check(&m_frame_advance, "pause icon", get_pause_display, set_pause_display, 0);
   if (pause_icon)
     pause_icon->hint = "gz's pause display at the top left while paused";
-  menu_item_t *button = menu_add_option(&m_frame_advance, "button", ARRAY_LEN(fa_button_names), fa_button_names,
-                                        get_fa_button, set_fa_button, 0);
-  if (button) {
-    button->hint = "the button for frame advance (the game no longer sees it while it's on)";
-    button->log_label = "frame advance button";
-  }
   menu_end_group(&m_frame_advance);
   menu_add_return(&m_frame_advance);
 }
 
 static void build_input_display(void)
 {
-  menu_init(&m_input_display, "input display", 12);
+  menu_init(&m_input_display, "input display", 13);
   menu_add_heading(&m_input_display, "display options");
   menu_item_t *show = menu_add_check(&m_input_display, "show", get_input_display, set_input_display, 0);
   if (show) {
@@ -2825,10 +3209,19 @@ static void build_input_display(void)
     size->hint = "small, medium, large: half, three quarters or all of the menu's text size";
     size->log_label = "input display size";
   }
+  menu_item_t *attach = menu_add_option(&m_input_display, "attach to watches", ARRAY_LEN(input_attach_names),
+                                        input_attach_names, get_input_attach, set_input_attach, 0);
+  if (attach) {
+    attach->hint = "join it to the watches box, just above or below it at the same width: the two go where the "
+                   "watches go (while the watches show)";
+    attach->log_label = "input display attached";
+  }
   menu_item_t *position = menu_add_option(&m_input_display, "position", GFX_NPLACES, watches_corner_names,
                                           get_input_corner, set_input_corner, 0);
-  if (position)
+  if (position) {
+    position->hint = "where it goes on its own (not attached, or with the watches hidden)";
     position->log_label = "input display position";
+  }
   menu_item_t *move = menu_add_action(&m_input_display, "move input display position", act_move_panel, MOVE_INPUT);
   if (move) {
     move->edit = move_panel;
@@ -2850,14 +3243,14 @@ static void build_levitate(void)
   menu_add_heading(&m_levitate, "levitation options");
   menu_item_t *lv = menu_add_check(&m_levitate, "enabled", get_levitate, set_levitate, 0);
   if (lv)
-    lv->hint = "L3: toggle   X: up   B: down   release: hover", lv->log_label = "levitate";
+    lv->hint = "{levitate}: toggle   {rise}: up   {sink}: down   {hover} or release: hover", lv->log_label = "levitate";
   /* enabled's options, under it */
   menu_item_t *walls = menu_add_check(&m_levitate, "through walls", get_walls, set_walls, 0);
   if (walls)
     walls->indent = 2, walls->hint = "Disable Link collision while floating; B descends through floors";
   menu_item_t *rise = menu_add_option(&m_levitate, "vertical speed", 7, lev_speed_names, get_lev_speed, set_lev_speed, 0);
   if (rise)
-    rise->indent = 2, rise->hint = "X/B speed; legacy 0 uses 4. Release to hover";
+    rise->indent = 2, rise->hint = "{rise}/{sink} speed; legacy 0 uses 4. Release to hover";
   menu_item_t *move = menu_add_option(&m_levitate, "move speed", 7, lev_move_names, get_lev_move, set_lev_move, 0);
   if (move)
     move->indent = 2;
@@ -2868,44 +3261,129 @@ static void build_levitate(void)
   menu_add_text(&m_levitate, text_levitate, 0);
 }
 
-static void build_settings(void)
+/* settings > rebind commands (gz's commands): each command and its bind (binds.h); L on one records a new bind */
+static menu_t m_commands;
+
+static void text_command(menu_item_t *it, char *buf, int len)
 {
-  menu_init(&m_settings, "settings", 16);
-  menu_add_heading(&m_settings, "menu settings");
-  menu_item_t *language = menu_add_option(&m_settings, "language", 1, lang_names(), get_lang, set_lang, 0);
+  command_t cmd = (command_t)it->data;
+  char name[48];
+  if (binds_recording(cmd))
+    snprintf(name, sizeof(name), "%s", binds_record_text());
+  else
+    bind_name(binds[cmd], name, sizeof(name));
+  snprintf(buf, len, "< %s >", name);
+}
+
+static bool edit_command(menu_item_t *it)
+{
+  bool going = binds_record_frame();
+  it->edit_hint = binds_record_hint(); /* the step it's at */
+  return going;
+}
+
+static void act_command(menu_item_t *it)
+{
+  binds_record_start((command_t)it->data);
+  menu_edit(it);
+}
+
+static void act_commands_default(menu_item_t *it)
+{
+  binds_reset();
+  gfx_notice("commands: back to their defaults");
+}
+
+static void build_commands(void)
+{
+  menu_init(&m_commands, "rebind commands", CMD_COUNT + CMD_GROUPS + 2);
+  for (int group = 0; group < CMD_GROUPS; group++) {
+    menu_add_heading(&m_commands, command_group_names[group]);
+    for (int c = 0; c < CMD_COUNT; c++) {
+      if (command_info[c].group != group)
+        continue;
+      menu_item_t *row = menu_add_action(&m_commands, command_info[c].name, act_command, c);
+      if (!row)
+        continue;
+      row->text = text_command;
+      row->edit = edit_command;
+      row->edit_alone = false;
+      row->log_label = ""; /* binds.c logs the new bind */
+      row->hint = command_info[c].required
+                    ? "L: rebind (press the new buttons in order, let go, then L to keep it; needed: can't be unbound)"
+                    : "L: rebind (press the new buttons in order, let go, then L to keep it)   L held: unbound";
+      row->edit_hint = binds_record_hint();
+    }
+  }
+  menu_end_group(&m_commands);
+  menu_item_t *defaults = menu_add_action(&m_commands, "restore defaults", act_commands_default, 0);
+  if (defaults)
+    defaults->hint = "L: every command back to its default (gz's buttons)";
+  menu_add_return(&m_commands);
+}
+
+/* settings > menu settings */
+static menu_t m_menu_settings;
+
+static bool get_switch_keyboard(menu_item_t *it)
+{
+  return swkbd_enabled;
+}
+
+static void set_switch_keyboard(menu_item_t *it, bool on)
+{
+  swkbd_enabled = on;
+}
+
+static void build_menu_settings(void)
+{
+  menu_init(&m_menu_settings, "menu settings", 9);
+  menu_item_t *language = menu_add_option(&m_menu_settings, "language", 1, lang_names(), get_lang, set_lang, 0);
   if (language)
     language->hint = "files in sd:/sloperinaGZ/lang (see lang/template.json)";
-  menu_item_t *size = menu_add_option(&m_settings, "size", ARRAY_LEN(size_names), size_names, get_size, set_size, 0);
+  menu_item_t *size = menu_add_option(&m_menu_settings, "size", ARRAY_LEN(size_names), size_names, get_size, set_size, 0);
   if (size)
     size->hint = "text size of the menu, watches and log (auto: for the screen)";
-  menu_item_t *opacity = menu_add_option(&m_settings, "background opacity", ARRAY_LEN(opacity_names), opacity_names,
+  menu_item_t *opacity = menu_add_option(&m_menu_settings, "background opacity", ARRAY_LEN(opacity_names), opacity_names,
                                          get_opacity, set_opacity, 0);
   if (opacity)
     opacity->hint = "the backdrop's opacity";
-  menu_item_t *hide = menu_add_check(&m_settings, "hide in game menus", get_hide_in_game_menus,
+  menu_item_t *hide = menu_add_check(&m_menu_settings, "hide in game menus", get_hide_in_game_menus,
                                      set_hide_in_game_menus, 0);
   if (hide)
     hide->hint = "no watches, input display or log over the game's pause screen and map";
-  menu_item_t *wheel = menu_add_check(&m_settings, "hide over item wheel", get_hide_over_item_wheel,
+  menu_item_t *wheel = menu_add_check(&m_menu_settings, "hide over item wheel", get_hide_over_item_wheel,
                                       set_hide_over_item_wheel, 0);
   if (wheel)
     wheel->hint = "no watches, input display or log while the game's item wheel is up";
-  menu_item_t *header = menu_add_check(&m_settings, "watch box header", get_header, set_header, 0);
+  menu_item_t *keyboard = menu_add_check(&m_menu_settings, "switch keyboard", get_switch_keyboard,
+                                         set_switch_keyboard, 0);
+  if (keyboard) {
+    keyboard->hint = "name things with the Switch's own keyboard (stick, L/R cursor, B delete, + done; the game "
+                     "waits meanwhile); off: sloperinaGZ's";
+    keyboard->log_label = "switch keyboard:";
+  }
+  menu_item_t *header = menu_add_check(&m_menu_settings, "watch box header", get_header, set_header, 0);
   if (header) {
     header->hint = "a small \"watches\" header over the watches box, underlined";
     header->log_label = "watch box header";
   }
-  menu_end_group(&m_settings);
-  menu_add_heading(&m_settings, "other settings");
+  menu_add_return(&m_menu_settings);
+}
+
+static void build_settings(void)
+{
+  menu_init(&m_settings, "settings", 7);
+  menu_add_submenu(&m_settings, "menu settings", &m_menu_settings);
   menu_add_submenu(&m_settings, "input display", &m_input_display);
   menu_add_submenu(&m_settings, "levitate", &m_levitate);
   menu_add_submenu(&m_settings, "frame advance", &m_frame_advance);
-  menu_add_submenu(&m_settings, "save backups", &m_save_backups);
-  menu_end_group(&m_settings);
+  menu_add_submenu(&m_settings, "rebind commands", &m_commands);
   menu_add_return(&m_settings);
 
+  build_menu_settings();
+  build_commands();
   build_frame_advance();
-  build_save_backups();
   build_input_display();
   build_levitate();
 }
@@ -3212,16 +3690,19 @@ static void act_dive_test(menu_item_t *it)
     menu_close(); /* it waits while the menu is open */
 }
 
+static menu_t m_log; /* (defined with the log's code below) debug > log */
+
 static void build_debug(void)
 {
   build_pause_research();
   build_flaglog();
-  menu_init(&m_debug, "debug", 6);
+  menu_init(&m_debug, "debug", 7);
   menu_add_submenu(&m_debug, "tests", &m_tests);
   menu_add_submenu(&m_debug, "heap", &m_heap);
   menu_add_submenu(&m_debug, "memory", &memview_menu);
   menu_add_submenu(&m_debug, "pause research", &m_pause_research);
   menu_add_submenu(&m_debug, "flag logging", &m_flaglog);
+  menu_add_submenu(&m_debug, "log", &m_log);
   menu_add_return(&m_debug);
   memview_build(&m_watches);
 
@@ -3484,7 +3965,11 @@ void menus_splash(void)
   static char title[64], date[64];
   snprintf(title, sizeof(title), "sloperinaGZ - %s", BUILD_VERSION);
   snprintf(date, sizeof(date), TF("Build Date: %s"), BUILD_WHEN);
-  const char *lines[] = { title, date, "practicerom.com/oothd", 0, T("R + right stick down: open the menu") };
+  static char open_with[96];
+  char bind[48];
+  bind_name(binds[CMD_MENU], bind, sizeof(bind)); /* the settings are loaded by now */
+  snprintf(open_with, sizeof(open_with), TF("%s: open the menu"), bind);
+  const char *lines[] = { title, date, "practicerom.com/oothd", 0, open_with };
   static const uint8_t styles[] = { GFX_DIM, GFX_DIM, GFX_LOG, GFX_LOG, GFX_NORMAL };
   static const uint8_t indents[] = { 0, 0, 0, 0, 0 };
   gfx_splash(lines, styles, indents, ARRAY_LEN(lines), SPLASH_FRAMES);
@@ -3509,18 +3994,18 @@ static void build_about(void)
 
 static void build_root(void)
 {
-  menu_init(&menu_root, "sloperinaGZ", 14);
+  menu_init(&menu_root, "sloperinaGZ", 15);
   menu_add_submenu(&menu_root, "link", &m_link);
   menu_add_submenu(&menu_root, "warps", &m_warps);
   menu_add_submenu(&menu_root, "scene", &m_scene);
   menu_add_submenu(&menu_root, "cheats", &m_cheats);
   menu_add_submenu(&menu_root, "inventory", &m_inventory);
   menu_add_submenu(&menu_root, "equips", &m_equips);
-  menu_add_submenu(&menu_root, "story", &m_story);
   menu_add_submenu(&menu_root, "watches", &m_watches);
+  menu_add_submenu(&menu_root, "save management", &m_save_backups);
+  menu_add_submenu(&menu_root, "story", &m_story);
   menu_add_submenu(&menu_root, "debug", &m_debug);
   menu_add_submenu(&menu_root, "settings", &m_settings);
-  menu_add_submenu(&menu_root, "log", &m_log);
   menu_add_submenu(&menu_root, "about", &m_about);
   menu_add(&menu_root, MI_BACK, "close");
 }
@@ -3537,6 +4022,7 @@ void menus_build(void)
   build_watches();
   build_scene();
   build_settings();
+  build_save_backups();
   build_debug();
   osk_build();
   build_log();

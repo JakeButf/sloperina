@@ -12,6 +12,7 @@
  * Nothing is read that isn't mapped (svcQueryMemory, sys_mapped); unreadable bytes show as ??. */
 #include "memview.h"
 
+#include "binds.h"
 #include "gamedata.h"
 #include "gfx.h"
 #include "input.h"
@@ -157,15 +158,15 @@ static bool address_cursor(menu_item_t *item, const char *line, int *start, int 
 
 static bool address_edit(menu_item_t *item)
 {
-  if (input_repeat(BTN_DLEFT)) {
+  if (cmd_repeat(CMD_LEFT)) {
     edit_pos = edit_pos > 0 ? edit_pos - 1 : 0;
-  } else if (input_repeat(BTN_DRIGHT)) {
+  } else if (cmd_repeat(CMD_RIGHT)) {
     edit_pos = edit_pos < ADDR_DIGITS - 1 ? edit_pos + 1 : ADDR_DIGITS - 1;
-  } else if (input_repeat(BTN_DUP) || input_repeat(BTN_DDOWN)) {
+  } else if (cmd_repeat(CMD_UP) || cmd_repeat(CMD_DOWN)) {
     int shift = (ADDR_DIGITS - 1 - edit_pos) * DIGIT_BITS;
-    int dir = input_repeat(BTN_DUP) ? 1 : -1;
+    int dir = cmd_repeat(CMD_UP) ? 1 : -1;
     edit_addr = (uintptr_t)step_digit(edit_addr, shift, dir);
-  } else if (input_pressed() & BTN_L) {
+  } else if (cmd_pressed(CMD_SELECT)) {
     show(edit_addr);
     gfx_logf("memory %0*lx", ADDR_DIGITS, (unsigned long)view_addr);
     return false;
@@ -276,13 +277,13 @@ static bool row_edit(menu_item_t *item)
   int n_positions = row_positions();
   if (edit_pos >= n_positions) /* the view changed to one with fewer */
     edit_pos = n_positions - 1;
-  if (input_repeat(BTN_DLEFT)) {
+  if (cmd_repeat(CMD_LEFT)) {
     edit_pos = edit_pos > 0 ? edit_pos - 1 : 0;
-  } else if (input_repeat(BTN_DRIGHT)) {
+  } else if (cmd_repeat(CMD_RIGHT)) {
     edit_pos = edit_pos < n_positions - 1 ? edit_pos + 1 : n_positions - 1;
-  } else if (edit_pos > 0 && (input_repeat(BTN_DUP) || input_repeat(BTN_DDOWN))) {
-    change_digit(row, input_repeat(BTN_DUP) ? 1 : -1);
-  } else if (input_pressed() & BTN_L) {
+  } else if (edit_pos > 0 && (cmd_repeat(CMD_UP) || cmd_repeat(CMD_DOWN))) {
+    change_digit(row, cmd_repeat(CMD_UP) ? 1 : -1);
+  } else if (cmd_pressed(CMD_SELECT)) {
     if (edit_pos == 0)
       watch_row(row);
     else if (view == V_PTR)

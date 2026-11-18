@@ -26,6 +26,9 @@ bool nativeui_rasterise(const gfx_panel_t *panel, uint8_t *dst, int scale, int w
 /* the same panel on the GPU (gpuui.c), at (x, y) of the visible area, on a band (opacity: 0..100) fading
  * into the game's picture: between gpuui_begin and gpuui_end. false: not drawn (the caller draws it its
  * own way). */
+/* set while drawing a panel joined to another (the input display to the watches): its band's fades and padding
+ * at this scale, the other's, so the two bands' edges are one (0: the panel's own scale) */
+extern int nativeui_band_scale;
 bool nativeui_gpu_panel(const gfx_panel_t *panel, int x, int y, int w, int h, int scale, int opacity,
                         nui_legacy_fn legacy);
 /* the GPU path's size of a panel at scale, in pixels, from gz's grid size of it in *w and *h: the band it

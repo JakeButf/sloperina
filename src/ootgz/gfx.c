@@ -270,12 +270,20 @@ void gfx_input_place(gfx_corner_t corner, int x_permille, int y_permille)
   input_y = (int16_t)y_permille;
 }
 
+static uint8_t input_attach; /* GFX_ATTACH_* (kept, as the place) */
+
+void gfx_input_attach(int attach)
+{
+  input_attach = (uint8_t)(attach == GFX_ATTACH_ABOVE || attach == GFX_ATTACH_BELOW ? attach : GFX_ATTACH_OFF);
+}
+
 void gfx_input(int col, int row, gfx_style_t style, const char *s)
 {
   input_panel.corner = input_corner;
   input_panel.x = input_x;
   input_panel.y = input_y;
   input_panel.yoff = 1; /* text in the middle of the panel (nvn.c TEXT_TOP) */
+  input_panel.attach = input_attach;
   if (row >= 0 && row < GFX_ROWS) {
     input_panel.alpha[row] = OPAQUE;
     input_panel.kind[row] = GFX_ROW_BUTTONS;

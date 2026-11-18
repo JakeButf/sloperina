@@ -6,10 +6,13 @@
 #include "osk.h"
 
 #include "gfx.h"
+#include "lang.h"
+#include "swkbd.h"
 #include "sys.h"
 
 static menu_t osk_menu;
-static char text[OSK_MAX + 1];
+static char text[OSK_MAX_TEXT + 1];
+static int text_max = OSK_MAX; /* this time's limit */
 static int cursor;     /* where the next character goes, 0..strlen(text) */
 static int key_column; /* the key picked, kept between rows */
 static bool shift;
@@ -28,7 +31,7 @@ static const char *const command_names[N_COMMANDS] = { "shift", "space", "back",
 static void insert(char c)
 {
   int len = (int)strlen(text);
-  if (len >= OSK_MAX)
+  if (len >= text_max)
     return;
   for (int i = len; i > cursor; i--)
     text[i] = text[i - 1];
@@ -188,9 +191,21 @@ void osk_build(void)
   menu_add_return(&osk_menu);
 }
 
-void osk_open(const char *title, const char *initial, void (*done)(const char *, intptr_t), intptr_t ctx)
+void osk_open(const char *title, const char *initial, int max, void (*done)(const char *, intptr_t), intptr_t ctx)
 {
-  snprintf(text, sizeof(text), "%s", initial ? initial : "");
+  text_max = max < 1 ? 1 : max > OSK_MAX_TEXT ? OSK_MAX_TEXT : max;
+  if (swkbd_enabled) { /* the Switch's own keyboard, held here until it's closed; this one if it can't be shown */
+    char typed[OSK_MAX_TEXT + 1];
+    int result = swkbd_ask(T(title), initial, text_max, typed, text_max + 1);
+    if (result == SWKBD_OK) {
+      if (done)
+        done(typed, ctx);
+      return;
+    }
+    if (result == SWKBD_CANCELLED)
+      return;
+  }
+  snprintf(text, (size_t)text_max + 1, "%s", initial ? initial : "");
   cursor = (int)strlen(text);
   shift = false;
   on_done = done;

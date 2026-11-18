@@ -51,6 +51,15 @@ uint64_t sys_tick(void) { return 100; }
 uint64_t sys_tick_freq(void) { return 1000; }
 uint32_t input_held(void) { return held; }
 uint32_t input_pressed(void) { return pressed; }
+/* the commands as bound by default (binds.c): levitate L3, up X, down B, hold the height R3 */
+uint32_t binds[CMD_COUNT];
+int bind_length(uint32_t bind) { (void)bind; return 1; }
+uint32_t cmd_mask(command_t c)
+{
+  return c == CMD_LEVITATE ? BTN_LSTICK : c == CMD_RISE ? BTN_X : c == CMD_SINK ? BTN_B : c == CMD_HOVER ? BTN_RSTICK : 0;
+}
+bool cmd_held(command_t c) { return cmd_mask(c) && (held & cmd_mask(c)) == cmd_mask(c); }
+bool cmd_pressed(command_t c) { return c == CMD_LEVITATE && (pressed & BTN_LSTICK); }
 void input_sticks(int32_t *lx, int32_t *ly, int32_t *rx, int32_t *ry)
 { *lx = stick_x; *ly = *rx = *ry = 0; }
 void log_printf(const char *fmt, ...) { (void)fmt; }

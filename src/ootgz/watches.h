@@ -62,6 +62,7 @@ extern int watches_x, watches_y;   /* GFX_CUSTOM: top-left, thousandths of the p
 extern bool watches_moving;        /* shown while the menu is open, to move them */
 extern bool input_display;         /* gz's input display (bottom left unless moved) */
 extern int input_corner;           /* ... where: gfx_corner_t, as the watches */
+extern int input_attach;           /* ... or joined to the watches box: GFX_ATTACH_* (off, above, below) */
 extern int input_x, input_y;       /* ... GFX_CUSTOM: top-left, thousandths of the picture */
 extern bool input_moving;          /* ... shown while the menu is open, to move it */
 extern bool input_display_bg;      /* ... on a background, as the watches */

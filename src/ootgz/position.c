@@ -17,14 +17,13 @@
 
 #include "gamedata.h"
 #include "gfx.h"
+#include "binds.h"
 #include "input.h"
 #include "levitate.h"
 #include "link.h"
 #include "lock.h"
 #include "sys.h"
 
-#define SAVE_COMBO (BTN_R | BTN_DUP)
-#define LOAD_COMBO (BTN_R | BTN_DDOWN)
 #define SETTLE 20       /* frames for a load to show: checked each frame, then given up */
 #define MAX_WRITES 4    /* written again every RETRY_EVERY frames until Link is there */
 #define RETRY_EVERY 3
@@ -153,9 +152,9 @@ static void settle_step(void)
 
 void position_frame(bool menu_open)
 {
-  if (!menu_open && input_combo(SAVE_COMBO))
+  if (!menu_open && cmd_pressed(CMD_SAVEPOS)) /* R + d-up unless changed (settings > rebind commands) */
     position_save();
-  else if (!menu_open && input_combo(LOAD_COMBO))
+  else if (!menu_open && cmd_pressed(CMD_LOADPOS)) /* R + d-down */
     position_load();
 
   link_record_status_t st = link_record_status();
@@ -167,7 +166,7 @@ void position_frame(bool menu_open)
     gfx_notice("Link's position not found, move around and try again");
   }
 
-  if (pending && st == REC_READY && !(input_held() & LOAD_COMBO)) {
+  if (pending && st == REC_READY && !(input_held() & cmd_mask(CMD_LOADPOS))) {
     pending = false;
     writes = 0;
     lock_hold_set(true); /* the write holds: the game's stores can't pull him off it while it settles */

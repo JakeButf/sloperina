@@ -32,6 +32,7 @@
 #include "cct.h"
 #include "gamedata.h"
 #include "gfx.h"
+#include "binds.h"
 #include "input.h"
 #include "levitate.h"
 #include "link.h"
@@ -292,7 +293,7 @@ static void carry_momentum(const link_t *l, uint32_t reaction)
 
 void ragdoll_frame(bool menu_open)
 {
-  if (!menu_open && !levitate_floating() && (input_pressed() & BTN_RSTICK)) {
+  if (!menu_open && !levitate_floating() && cmd_pressed(CMD_RAGDOLL)) { /* R3 unless changed */
     ragdoll_set(!ragdoll_active());
     return;
   }

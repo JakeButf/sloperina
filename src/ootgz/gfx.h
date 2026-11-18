@@ -146,6 +146,7 @@ typedef struct {
   uint8_t  clicks;                    /* ... bit 0 L3, bit 1 R3, bits 2..5 d-pad up, down, left, right */
   uint8_t  device;                    /* ... the controller in use: GFX_PAD_PRO, _JOYCONS or _HANDHELD */
   int8_t   yoff;                      /* the text moved down this many font pixels (centred: 1) */
+  uint8_t  attach;                    /* input display: GFX_ATTACH_*, joined to the watches box */
   uint8_t  scale_pct;                 /* drawn at this % of the menu's size (0: the same) */
   uint8_t  kind[GFX_ROWS];            /* the menu: what each row is (gfx_row_kind_t, GFX_ROW_OPENS) */
   char     hint[GFX_HINT_LEN];        /* the menu: its hint as one text, which the game's style wraps itself */
@@ -193,6 +194,10 @@ void gfx_input_minimal(const int8_t sticks[4], uint8_t clicks, uint16_t buttons)
 void gfx_input_background(bool on); /* the input display on a background, as the watches */
 void gfx_input_scale(int percent);  /* ... at this % of the menu's text size */
 void gfx_input_place(gfx_corner_t corner, int x_permille, int y_permille); /* ... where (x, y: GFX_CUSTOM) */
+/* ... or joined to the watches box, above or below it at its width, the two placed as one where the watches go
+ * (while the watches show; else where gfx_input_place says) */
+enum { GFX_ATTACH_OFF, GFX_ATTACH_ABOVE, GFX_ATTACH_BELOW };
+void gfx_input_attach(int attach);
 /* set by nvn.c: where each GFX_CUSTOM panel was really put (kept whole on screen), thousandths; -1 not yet */
 extern volatile int gfx_custom_x[GFX_PANELS], gfx_custom_y[GFX_PANELS];
 /* gz's pause display at the top left: 0 none, 1 paused (two bars), 2 advancing a frame (bar + play) */

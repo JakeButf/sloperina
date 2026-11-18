@@ -122,7 +122,8 @@ Bools by setting:
 ### Save files
 - `%APPDATA%\eden\nand\user\save\0000000000000000\<user id>\0400486024DEC000\slot_NN\progress.sav`: from offset
   0x20, `(hash u32, value u32)` pairs; for String64 fields the value is the file offset of a 64-byte text slot. No
-  checksum. `caption.sav` holds the location and the save date (also hash/value pairs).
+  checksum. `caption.sav` holds the location and the save date (also hash/value pairs). The game reads the captions
+  once, at boot, and keeps them in its CaptionMgr (§9.11); `slot_06`..`slot_11` are the Master Quest slots.
 - Saving writes back what Link actually holds (e.g. `PlayerStatus.Equip*`).
 
 ### Useful name patterns
@@ -1247,3 +1248,131 @@ the leave's calls.**
 - **`eventskip.c`** (scene > end cutscene): skips every flow with bit 25 set (with the bounds checks, repeated every
   180 frames like the WaitFinish node, up to 1800 frames); an event with no timeline gets the manager's cancel. It
   logs each flow on the first press (`eventskip: flow i/n ...`) and when the event is gone.
+
+### 9.11 Save captions: the CaptionMgr and reloading it (v131072; from the disassembly, not yet checked in game)
+After **save management > restore** the files on the save mount are the archive's and loading a slot gives the
+restored progress (checked in Lichii: `SeqExecuteLoadSaveData` reads `progress.sav` from the mount when it loads),
+but the Load list still shows the old captions (location, date, picture). They come from the **CaptionMgr**, which
+reads every slot's caption once, at boot, and keeps it.
+- **The instance:** `*[main+0x4E78E38]` (also reached as `[[main+0x4C81660]]`), created at boot by
+  `main+0xEC9370` (size 0x98, vtable `main+0x4BDFFD8`, only a destructor in it). Fields:
+  - `+0x08` count (s32), `+0x0C` capacity (6), `+0x10` pointer to the entries of the six normal slots; `+0x48`,
+    `+0x4C`, `+0x50` the same for six more, read from `slot_06`..`slot_11` (index + 6, `main+0xCBC428`): the Master
+    Quest slots. `+0x91` (u8) picks which six the menus show; `SeqOneShotSetMQMode` (vtable `main+0x4BBD360`, work
+    `main+0x32E5480`) sets it.
+  - `+0x88` latest index (s32, -1 none; `SeqOneShotSetCaptionMgrLatestIndex`, work `main+0x32DFF80`, sets it from
+    the slot loaded). `main+0x33AD5D0(mgr)` returns it, or when it's -1 the slot of the newest caption.
+  - `+0x8C` state (u8): 0 idle/empty, 1 loading, 2 sorting, 3 (a different job, `main+0x9C5210`), 4 loaded.
+  - `+0x8D` bit 0: load requested. `+0x8E` / `+0x8F`: some normal / MQ slot has a save.
+  - `+0x90` (u8) "can receive load request": 1 from the constructor; `SeqOneShotSetCaptionMgrCanReceiveLoadRequest`
+    (vtable `main+0x4BB9958`, work `main+0x32DFDA0`) writes its input there, but no `Sequence/*.ainb` uses that node
+    and no code reading the byte was found. Not needed.
+  - An entry (0x5A0 bytes) has its state at `+0x00` (0 empty, 1 reading, 3 read, 4 picture building, 5 done),
+    its slot `+0x04`, and `+0x280` bit 0 = the slot has a save.
+- **"Stable"** (what `SeqExecuteWaitCaptionMgrStable`, update `main+0x32C6410`, and `ConfirmationLoad` wait for):
+  state 0, or state 4 with every entry of both lists in state 5. The menus' getter `main+0x33AD490(mgr, &entry,
+  index)` returns false unless state is 4 and all entries are 5.
+- **The update** `main+0x4E5420(mgr)`, called from `main+0x340A460` (slot 2 of the singleton at
+  `*[main+0x4E7CFA8]`, vtable `main+0x4BF0FA0`, which also holds the `save` mount): state 0 with `+0x8D` bit 0 →
+  1; state 1 steps each entry in turn (`main+0xCBC350` asks the scene's save reader for `slot_NN`'s caption, which
+  sets the entry to 1; `main+0x4EA190` waits for the reader (bit 0 of its `+0x158` done → `main+0xBAEBB0` takes
+  the caption → 3; bit 1, no file → 5, no save); `main+0xBAE850` builds the picture → 4; `main+0x9C5320` → 5),
+  then → 2; state 2 sorts both lists (`main+0xBAE520`), → 4 and clears `+0x8D` bit 0. "Serialize" in the node names
+  is that taking of the read file into the entry.
+- **`SeqOneshotRequestLoadAndSerializeCaption`** (vtable `main+0x4BC3030`, work in slot 39 `main+0xF6DA00`) calls
+  `main+0xF6DA40(mgr)`: if the state is 1 to 3 (or 4 with an entry not done) **or the state is 4**, it only sets
+  `+0x8D` bit 0 and returns, and nothing reads that bit in state 4. So once loaded, the game's request does nothing:
+  only boot (`FormalSequence.root`, `BeforeInitializeCommon.module`) loads captions. From state 0 (after a check
+  on the scene's save reader) it sets bit 0 and calls `main+0xBB0010(mgr)`: every entry of both lists emptied
+  (`main+0xBAFF10(entry, index, isMQ)`), `+0x8E` cleared, state 0 (`+0x88` and `+0x91` kept). The full reset
+  `main+0xBAFE50(mgr)` (also clears `+0x88` to -1, `+0x8D`, `+0x91`) only runs from a callback the save singleton
+  keeps (`main+0xBAFD40`, at its `+0x788`), when the CaptionMgr is stable.
+- **To reload after a restore (untested):** on the game's thread, once `stable(mgr)`: `main+0xBB0010(mgr)`, then
+  `+0x8D |= 1` (what `main+0xF6DA40` does from state 0, without its check), optionally `+0x88 = -1`. The update
+  then reads all twelve slots again, one at a time, and the Load list (which waits for stable) shows them. Don't do
+  it while the game saves or loads: the read goes through the same save reader, one request at a time
+  (`main+0xCBC350` doesn't queue when it's busy).
+- **Not part of the save mount:** the game safety temporary save is `savt:/TemporaryGame.sav` (temporary storage,
+  `main+0x3032330`); a restore leaves it alone.
+- **To check in game:** `[*[main+0x4E78E38]+0x8C]` is 4 in the field and `+0x08` / `+0x48` are 6; after the reload
+  it goes 0 → 1 → 2 → 4; a breakpoint at `main+0xCBC350` is hit twelve times (more if the reader is busy); and
+  `main+0x4E5420` runs every frame on the same thread as the mod's frame hook.
+- **Checked in Lichii:** after a restore, `main+0xBB0010` then `main+0xF6DA40` makes the update read every slot's
+  caption again (about 58 frames).
+- **What the Load list shows comes straight from the CaptionMgr** (from the disassembly and the sequence graphs, 18th
+  November 2026; not checked in game unless stated). The GameData struct `CaptionData` (`0x46926D32`) holds only
+  `SelectedSavePathIndex` (`0xD13D898B`), the slot to load. The list screen is `UISystemLoadListScreen`
+  (`SystemLoadList_00`, name hash `0x73033AAB`), vtable `main+0x4BEEBA0`:
+  - `+0x2B0` its list (0x80 bytes, vtable `main+0x4BEEF08`, made by slot 35 `main+0x3400B40` for the part
+    `N_SlideList_00`): `+0x30` the scroll widget, `+0x60` (s32) / `+0x68` the rows (0x290-byte items, made by slot 93
+    `main+0x3400410` through `main+0x34006D0`). `+0x2C0` (u8) "closable" (`SeqQueryIsClosableLoadListScreen`): 1 from
+    slot 104 (`main+0x3400970`), 0 after a decide (slot 50).
+  - A row is filled when the list binds it (list vtable slot 18, `main+0x3400C70` → `main+0x33CC800(item,
+    index)`): the getter `main+0x33AD490`; if it returns false (not loaded) **the row is left as it was**; otherwise
+    `main+0x33CC8F0` writes the date into `SimpleIntForMessage`/`2`/`3`, `SimpleHourForMessage(As24Hour)`,
+    `SimpleMinForMessage` to format the text (the patch mailbox's day-of-month clash, §5.3), sets the icons, and
+    `main+0xE4B660(picture, &entry->+0xF0, 0)` copies the entry's texture handle into the picture pane (item `+0x168`).
+    The row keeps the index (item `+0x258`), not the entry pointer. Rows are bound when the screen is refreshed and
+    when scrolling brings a row in (list vtable slot 9, `main+0x37739F0`: shows the row, then binds it); not every
+    frame. Focus (screen slot 46, `main+0x34009D0`) and decide (slot 50, `main+0x3400AB0` → `main+0x33CE110(item,
+    button, row)`) call the getter again: focus writes the row's slot (-1 if the getter fails) to the save singleton's
+    `+0x540` (`*[main+0x4E7CFA8]`); decide writes it to `CaptionData.SelectedSavePathIndex` and the row to
+    `SelectedSaveDataListBtnIndex`. So an A while the captions aren't loaded gives -1 and `LoadList` just waits.
+  - **Slot 98, `main+0x3400810(screen)`, refreshes it** (what opening it runs): every row reset, every row hidden
+    (`main+0x3773490(list)`: `SetVisible(false)` on each row's pane, `main+0x20AEA0`, pane `+0xA8` bit 0), the row
+    count set from the CaptionMgr (`+0x0C`, or `+0x4C` in MQ mode) with the list marked for binding
+    (`main+0x3773510`, list `+0x55 |= 4`), focus on `SelectedSaveDataListBtnIndex` (clamped, `main+0x37735D0`),
+    and `CaptionData.SelectedSavePathIndex = -1` (decide sets it).
+  - The confirmation (`LoadCheck`) uses `UISystemSaveLoadScreen` (`SystemSaveLoad_00`, vtable `main+0x4BEF840`),
+    loaded on entry and closed and unloaded on leaving; its slot 98 (`main+0x3405000` → `main+0x3405080`) binds
+    the chosen row the same way in Load mode (`+0x2AC == 1`), otherwise shows the manual-save caption. The getter's
+    only callers are `main+0x33CC800`, `main+0x33CC8F0`, `main+0x33CE110` and `main+0x34009D0`.
+- **An entry's picture:** `+0xF0` (u64) the texture handle (-1 none), copied from `+0x90` by `main+0x9C5320` (state
+  4 → 5); `+0x28` the texture and `+0x38` / `+0x40` its memory; `+0x18` the read file (freed once the picture is
+  made); `+0x1C0`..`+0x1D0` the date; `+0x280` bit 1: has a picture. Emptying it (`main+0xBAFF10`, run by
+  `BB0010`) sets `+0xF0` to -1 and destroys and frees the texture's memory at once (no deferral seen). **So a Load
+  list that's up while `BB0010` runs keeps drawing the old handles** of freed textures until it's refreshed, and a
+  refresh before the captions are loaded leaves them too (rows are shown, the getter returns false, the row isn't
+  touched). What that does on hardware isn't known (garbage at best, a GPU fault at worst); the game itself only
+  empties the entries at boot and when nothing shows them.
+- **`SeqExecuteSerializeCaption`** (vtable `main+0x4BA82C0`; outputs `SerializedCaption` and `Size` registered in
+  slot 28 `main+0xDA9C00`; update in slot 30 `main+0xB19E70`) has nothing to do with the list: it asks the save
+  singleton `*[main+0x4E7CFA8]` to serialize a caption of the moment (`+0x480` state 6: start, `main+0xB19F00(+0x78)`;
+  state 10: done, buffer `+0x470`, size `+0x478`). Only `PlusMinusPauseCapture.module` uses it, after the screen
+  capture: the result goes into the GameData binary `UI_ManualSaveCaption` (`UI_IsValidManualSaveCaption = true`),
+  which `Save.module` saves and `SeqOneShotManualSsetCaptionData` (work `main+0x32D73A0`) puts into one entry
+  (`main+0xBAE810`: empty it, take the caption, build the picture). `FormalSequence.root` and
+  `BeforeInitializeCommon.module` use `SeqOneshotRequestLoadAndSerializeCaption` (above), not this.
+- **The menus' flow** (`ConfirmationLoad`, `LoadList`, `PlusMenu`): Load on the System page runs `ConfirmationLoad`:
+  it sets the menu screen Enum (`SeqOneShotSetCurrentFullScreenUIType`, the Enum `0x578D41E1` of §9.1) to 6 (`Load`),
+  waits for autosave and for `SeqExecuteWaitCaptionMgrStable` (state 0 counts as stable), then, if a save exists,
+  `SelectedSaveDataListBtnIndex = -1` and `LoadList`: load and open `SystemLoadList_00`, then each frame TrigA / TrigB
+  of the `UI` controller (`SeqQueryControllerTrigMaskChecker`). A: the screen's decide, then `CaptionData.
+  SelectedSavePathIndex` (-1: back to waiting) → close the list (not unloaded) → `LoadCheck`, whose "List" comes back
+  into `LoadList` (opened again: refreshed). B (only while closable): cancel sound, close and unload the list →
+  "Menu" → `SeqOneShotMoveBoxCursorByButton(PlusMenu_00, Pa_System_00/Pa_Button_01)` (the cursor back on Load) →
+  "No" → `PlusMenu` opens `PlusMenu_00` again and sets the Enum back to 4 (`SystemMenu`). So backing out of the list
+  should let the reload run (unchecked: what the Enum reads after B).
+- **Refreshing an open Load list after a restore (proposal, untested):** on the game's thread (`savebackup_frame`,
+  as the map screen's refresh, §5.8), when the Enum is `Load`, the `UISystemLoadListScreen` is in the UI manager's
+  list (vtable `main+0x4BEEBA0`, `+0x2B0` not 0) and the `UISystemSaveLoadScreen` (`main+0x4BEF840`) isn't:
+  1. hide the rows: `main+0x3773490([screen+0x2B0])`, and keep the controller from the game (sticks too) until the
+     end, so scrolling doesn't show and bind a row meanwhile (it would show it with its old picture; A and B are
+     harmless: A gives -1, B unloads the list);
+  2. a few frames later (the GPU may still draw the last frames), `BB0010` and the request as now;
+  3. once settled, the screen's slot 98 (`main+0x3400810(screen)`, i.e. `ui_refresh_now(0x4BEEBA0)`): the rows are
+     bound again from the reloaded captions; then give the controller back.
+  If the list closes meanwhile, nothing needs refreshing (the next opening binds the new captions). Not covered:
+  touch (the list's buttons take touches).
+- **The fallback (B, reload, A) would work but is clumsier:** B closes the list and puts the cursor on Load (above);
+  the A has to wait for `PlusMenu` to take input again, and for the reload to finish (an A while the state is still
+  0 after `BB0010` opens the list on empty captions, since 0 counts as stable). Both presses must be edges on the
+  `UI` controller, and `input_block_game` (the mod's menu open) drops forced buttons.
+- **To check in game:** the list screen is found by vtable only while the list is loaded, `[+0x2B0]` not 0 and
+  `+0x2C0` 1 when idle; the Enum after B; `main+0x3773490` empties the rows and slot 98 alone brings them back
+  (before trying it with a reload), with the cursor where it was and A loading that row; a breakpoint at
+  `main+0x33CC800` is hit for each visible row after the refresh with the getter returning true.
+- **1.0.0:** not looked at (its exefs `main` is compressed in a way the tools here don't read). Find the same
+  addresses from `SeqOneshotRequestLoadAndSerializeCaption`: the function returning the string is slot 19 of the
+  node's vtable, slot 39 is the work, whose first `adrp`/`ldr` gives the instance's GOT entry and whose `bl` is
+  `F6DA40`'s match; the `b` at its end leads to `BB0010`'s match.
