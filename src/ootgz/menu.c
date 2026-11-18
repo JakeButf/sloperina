@@ -1,5 +1,6 @@
 #include "menu.h"
 
+#include "binds.h"
 #include "gameimage.h"
 #include "gfx.h"
 #include "input.h"
@@ -8,7 +9,19 @@
 
 /* --- the item pool --------------------------------------------------------------------------- */
 
-#define POOL_ITEMS 1400
+/* menu text with the binds in it (binds_expand): "{savepos}", and the menu's own buttons as now bound. A few
+ * buffers in turn, as a hint is measured while another is in use. */
+static const char *with_binds(const char *text)
+{
+  static char bufs[4][256];
+  static int next;
+  if (!text)
+    return text;
+  next = (next + 1) % 4;
+  return binds_expand(text, bufs[next], sizeof(bufs[next]));
+}
+
+#define POOL_ITEMS 1800 /* 1400, then save management's archive lists and menus */
 
 static menu_item_t pool[POOL_ITEMS];
 static int pool_used;
@@ -118,7 +131,7 @@ menu_item_t *menu_add_text(menu_t *menu, void (*text)(menu_item_t *, char *, int
   return item;
 }
 
-static void heading_text(menu_item_t *item, char *buf, int len) { snprintf(buf, len, "%s", T(item->label)); }
+static void heading_text(menu_item_t *item, char *buf, int len) { snprintf(buf, len, "%s", with_binds(T(item->label))); }
 
 menu_item_t *menu_add_heading(menu_t *menu, const char *label)
 {
@@ -239,7 +252,7 @@ static void log_item(menu_item_t *item, uint32_t log_count_before)
   bool not_logged = item->log_label && !item->log_label[0];
   if (logged_itself || unnamed || not_logged)
     return;
-  const char *name = T(item->log_label ? item->log_label : item->label);
+  const char *name = with_binds(T(item->log_label ? item->log_label : item->label));
   char value[64] = "";
   switch (item->kind) {
     case MI_CHECK:
@@ -358,21 +371,22 @@ static void activate(menu_item_t *item)
 
 /* --- input ----------------------------------------------------------------------------------- */
 
-/* Numbers: L held makes d-left/right go by NUMBER_BIG_STEP, so their own L (fill) happens when L is
- * let go, and only if the d-pad wasn't used meanwhile. */
+/* Numbers: select (L) held makes left/right go by NUMBER_BIG_STEP, so their own select (fill) happens when it's
+ * let go, and only if left/right weren't used meanwhile. The menu's buttons are commands (binds.h), so
+ * settings > rebind commands can change them. */
 static bool l_down_on_number, l_used_for_big_steps;
 
 /* L and d-left/right on a number; true if they used this frame's input */
 static bool number_input(menu_item_t *item)
 {
-  bool l_held = (input_held() & BTN_L) != 0;
-  if (input_pressed() & BTN_L) {
+  bool l_held = cmd_held(CMD_SELECT);
+  if (cmd_pressed(CMD_SELECT)) {
     l_down_on_number = true;
     l_used_for_big_steps = false;
   }
-  if (l_held && (input_repeat(BTN_DLEFT) || input_repeat(BTN_DRIGHT))) {
+  if (l_held && (cmd_repeat(CMD_LEFT) || cmd_repeat(CMD_RIGHT))) {
     l_used_for_big_steps = true;
-    change(item, input_repeat(BTN_DLEFT) ? -NUMBER_BIG_STEP : NUMBER_BIG_STEP);
+    change(item, cmd_repeat(CMD_LEFT) ? -NUMBER_BIG_STEP : NUMBER_BIG_STEP);
     return true;
   }
   if (!l_held && l_down_on_number) {
@@ -381,17 +395,17 @@ static bool number_input(menu_item_t *item)
       activate(item);
     return true;
   }
-  return (input_pressed() & BTN_L) != 0; /* just pressed: wait for it to be let go */
+  return cmd_pressed(CMD_SELECT); /* just pressed: wait for it to be let go */
 }
 
 /* a page of text: the page moves, the cursor stays on return (menu_draw keeps the scroll in range) */
 static void scroll_text_input(menu_t *menu, menu_item_t *item)
 {
-  if (input_repeat(BTN_DUP))
+  if (cmd_repeat(CMD_UP))
     menu->scroll--;
-  else if (input_repeat(BTN_DDOWN))
+  else if (cmd_repeat(CMD_DOWN))
     menu->scroll++;
-  else if (input_pressed() & BTN_L)
+  else if (cmd_pressed(CMD_SELECT))
     activate(item);
 }
 
@@ -417,23 +431,23 @@ void menu_input(void)
     l_down_on_number = false;
   }
   bool has_parts = item->n_parts > 1;
-  if (input_repeat(BTN_DUP)) {
+  if (cmd_repeat(CMD_UP)) {
     if (!item->on_move || !item->on_move(item, -1))
       move_selection(menu, -1);
-  } else if (input_repeat(BTN_DDOWN)) {
+  } else if (cmd_repeat(CMD_DOWN)) {
     if (!item->on_move || !item->on_move(item, 1))
       move_selection(menu, 1);
-  } else if (has_parts && input_repeat(BTN_DLEFT)) {
+  } else if (has_parts && cmd_repeat(CMD_LEFT)) {
     item->part = item->part > 0 ? item->part - 1 : 0;
-  } else if (has_parts && input_repeat(BTN_DRIGHT)) {
+  } else if (has_parts && cmd_repeat(CMD_RIGHT)) {
     item->part = item->part < item->n_parts - 1 ? item->part + 1 : item->n_parts - 1;
-  } else if (input_repeat(BTN_DLEFT)) {
+  } else if (cmd_repeat(CMD_LEFT)) {
     change(item, -1);
-  } else if (input_repeat(BTN_DRIGHT)) {
+  } else if (cmd_repeat(CMD_RIGHT)) {
     change(item, 1);
-  } else if (item->press && ((input_pressed() & BTN_L) || (item->press_repeat && input_repeat(BTN_L)))) {
+  } else if (item->press && (cmd_pressed(CMD_SELECT) || (item->press_repeat && cmd_repeat(CMD_SELECT)))) {
     item->press(item, item->part < item->n_parts ? item->part : 0);
-  } else if (input_pressed() & BTN_L) {
+  } else if (cmd_pressed(CMD_SELECT)) {
     activate(item);
   }
 }
@@ -503,7 +517,7 @@ static int item_reserve(menu_item_t *item)
 static void item_line(menu_item_t *item, char *buf, int len)
 {
   char value[96] = "", pictured[96];
-  const char *label = T(item->label);
+  const char *label = with_binds(T(item->label));
   int picture = item->picture;
   if (picture && item->kind == MI_OPTION && item->choice_pictures) { /* the chosen one's picture */
     int choice = item->get_option(item);
@@ -588,7 +602,7 @@ static const char *item_hint_english(const menu_item_t *item)
   }
 }
 
-static const char *item_hint(const menu_item_t *item) { return T(item_hint_english(item)); }
+static const char *item_hint(const menu_item_t *item) { return with_binds(T(item_hint_english(item))); }
 
 /* --- drawing --------------------------------------------------------------------------------- */
 
@@ -711,9 +725,9 @@ static const char *current_hint(const menu_t *menu)
 {
   const char *hint = menu->n_items ? item_hint(&menu->items[menu->selected]) : 0;
   if (menu_editing && menu_editing->edit_hint)
-    hint = T(menu_editing->edit_hint);
+    hint = with_binds(T(menu_editing->edit_hint));
   if (menu->scroll_text)
-    hint = T("d-up/down: scroll   L: return");
+    hint = with_binds(T("d-up/down: scroll   L: return"));
   return hint;
 }
 
@@ -797,9 +811,9 @@ static void measure_hints(const menu_t *menu, int wrap_w, int *rows, int *width)
   for (int i = 0; i < menu->n_items; i++) {
     const menu_item_t *item = &menu->items[i];
     measure_hint(item_hint(item), wrap_w, rows, width);
-    measure_hint(T(item->edit_hint), wrap_w, rows, width);
+    measure_hint(with_binds(T(item->edit_hint)), wrap_w, rows, width);
     for (int k = 0; item->part_hints && k < item->n_parts && k < MAX_PART_HINTS; k++)
-      measure_hint(T(item->part_hints[k]), wrap_w, rows, width);
+      measure_hint(with_binds(T(item->part_hints[k])), wrap_w, rows, width);
   }
 }
 

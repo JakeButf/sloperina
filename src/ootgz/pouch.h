@@ -10,6 +10,7 @@
 bool pouch_add_now(const char *item, bool equip_direct);
 bool pouch_remove_now(const char *item);
 bool ui_refresh_now(uintptr_t vtable_off); /* virtual method 98 of the screen with that vtable */
+uintptr_t ui_find_screen(uintptr_t vtable_off); /* the UI manager's screen with that vtable (open), or 0 */
 bool hud_refresh_now(void);
 int32_t pouch_stock(const char *item);     /* PouchData.<item>.StockNum, or -1 */
 

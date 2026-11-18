@@ -1885,16 +1885,36 @@ static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index)
   if (overlays)
     gpu_panels++;
 
-  /* the input display over the watches in the bottom left, both on their bands (the game's style): one
-   * width for both, the wider's, so the two bands are one */
-  int stacked_w = 0;
-  if (gpu && screen) {
+  /* the input display joined to the watches box (gfx_input_attach): the two placed as one block where the
+   * watches go, the input display just above or below them; or, not joined, over the watches in the bottom left
+   * with both on their bands. Either way one width for both in the game's style, the wider's, so they read as
+   * one (gz's style keeps each its own: its panels' buffers are sized for their own widths). */
+  int stacked_w = 0, stacked_scale = 0; /* stacked_scale: the watches', for the input display's band */
+  bool attached = false;
+  int hud_at_x = 0, hud_at_y = 0, input_at_y = 0;
+  if (screen) {
     const gfx_panel_t *hud = &screen->panel[PANEL_HUD], *input = &screen->panel[GFX_PANEL_INPUT];
     int c, r, s, hud_w, hud_h, input_w, input_h;
-    if (hud->corner == GFX_BOTTOM_LEFT && input->corner == GFX_BOTTOM_LEFT && !hud->clear && !input->clear &&
-        panel_size(PANEL_HUD, hud, &frame, gpu, &c, &r, &s, &hud_w, &hud_h) &&
-        panel_size(GFX_PANEL_INPUT, input, &frame, gpu, &c, &r, &s, &input_w, &input_h))
-      stacked_w = hud_w > input_w ? hud_w : input_w;
+    bool both = panel_size(PANEL_HUD, hud, &frame, gpu, &c, &r, &s, &hud_w, &hud_h) &&
+                panel_size(GFX_PANEL_INPUT, input, &frame, gpu, &c, &r, &s, &input_w, &input_h);
+    int wider = hud_w > input_w ? hud_w : input_w;
+    int hud_scale = 0;
+    if (both)
+      panel_size(PANEL_HUD, hud, &frame, gpu, &c, &r, &hud_scale, &hud_w, &hud_h);
+    if (both && input->attach != GFX_ATTACH_OFF) {
+      attached = true;
+      if (gpu)
+        stacked_w = wider, stacked_scale = hud_scale;
+      int block_x, block_y;
+      place_panel(PANEL_HUD, hud, &frame, wider, hud_h + input_h, &block_x, &block_y);
+      bool above = input->attach == GFX_ATTACH_ABOVE;
+      hud_at_x = block_x;
+      hud_at_y = above ? block_y + input_h : block_y;
+      input_at_y = above ? block_y : block_y + hud_h;
+    } else if (both && gpu && hud->corner == GFX_BOTTOM_LEFT && input->corner == GFX_BOTTOM_LEFT && !hud->clear &&
+               !input->clear) {
+      stacked_w = wider, stacked_scale = hud_scale;
+    }
   }
 
   panel_draw_t draws[GFX_PANELS];
@@ -1908,14 +1928,20 @@ static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index)
     if (stacked_w && (p == PANEL_HUD || p == GFX_PANEL_INPUT))
       w = stacked_w;
     int x, y;
-    place_panel(p, panel, &frame, w, h, &x, &y);
-    if (p == PANEL_HUD && panel->corner == GFX_BOTTOM_RIGHT)
-      hud_bottom_right = y;
+    if (attached && (p == PANEL_HUD || p == GFX_PANEL_INPUT)) { /* the block's halves */
+      x = hud_at_x;
+      y = p == PANEL_HUD ? hud_at_y : input_at_y;
+    } else {
+      place_panel(p, panel, &frame, w, h, &x, &y);
+    }
+    if (p == PANEL_HUD && panel->corner == GFX_BOTTOM_RIGHT) /* the log goes above the watches (and what's joined) */
+      hud_bottom_right = attached && input_at_y < y ? input_at_y : y;
     if (p == PANEL_HUD && panel->corner == GFX_BOTTOM_LEFT)
       hud_bottom_left = y;
     if (p == GFX_PANEL_LOG && hud_bottom_right >= 0 && y + h > hud_bottom_right)
       y = hud_bottom_right - h;
-    if (p == GFX_PANEL_INPUT && panel->corner == GFX_BOTTOM_LEFT && hud_bottom_left >= 0 && y + h > hud_bottom_left)
+    if (p == GFX_PANEL_INPUT && !attached && panel->corner == GFX_BOTTOM_LEFT && hud_bottom_left >= 0 &&
+        y + h > hud_bottom_left)
       y = hud_bottom_left - h;
     if (y < frame.margin)
       y = frame.margin;
@@ -1926,7 +1952,10 @@ static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index)
     if (w <= 0 || h <= 0)
       continue;
     if (gpu) { /* drawn on the GPU at its own size: nothing goes through the panels' buffers */
-      if (nativeui_gpu_panel(panel, x, y, w, h, scale, frame.opacity, native_legacy_pixel))
+      nativeui_band_scale = stacked_scale && p == GFX_PANEL_INPUT ? stacked_scale : 0; /* its band as the watches' */
+      bool drawn = nativeui_gpu_panel(panel, x, y, w, h, scale, frame.opacity, native_legacy_pixel);
+      nativeui_band_scale = 0;
+      if (drawn)
         gpu_panels++;
       continue;
     }

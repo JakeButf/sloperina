@@ -13,6 +13,12 @@
  *   save_backup_location=0|1 (the save's location after the date in their folder names)
  *   save_backup_kinds=0|1|2 (autosaves, hard saves, both)
  *   input_display_position=<gfx_corner_t>   input_display_x=, input_display_y= (custom: thousandths)
+ *   input_display_attach=0|1|2 (on its own, joined above the watches box, below it)
+ *   archive_folder=<folder in save-archives/, e.g. Any% run/Forest> (where archive now puts them; "": the top)
+ *   system_keyboard=0|1 (names typed with the Switch's own keyboard, swkbd.h, or sloperinaGZ's, osk.h)
+ *   bind_<command key>=<buttons> (settings > rebind commands, binds.h): e.g. bind_menu=R + rs-down, bind_ragdoll=unbound
+ *   frame_advance_button=1 (from before the binds: frame advance on R) is read once, into bind_advance and
+ *   bind_run, when the file has no bind_advance
  *   settings_version=<n> (SETTINGS_VERSION when saved: what settings_load has updated the file for)
  *
  * (save_settings_file writes every key; parse_line reads them.)
@@ -34,6 +40,8 @@
 #include "voidmap.h"
 #include "flaglog.h"
 #include "savebackup.h"
+#include "binds.h"
+#include "swkbd.h"
 
 #include "sdfs.h"
 #include "lang.h"
@@ -47,7 +55,7 @@
 #define LOG_FILE_GAP GAME_FPS   /* frames between writes */
 #define OLD_SETTINGS_FILE SD_OLD_DIR "/settings.ini"
 #define SAVE_GAP_FRAMES (2 * GAME_FPS) /* between settings writes */
-#define SETTINGS_TEXT_MAX 2048 /* the settings file's size limit, both ways */
+#define SETTINGS_TEXT_MAX 4096 /* the settings file's size limit, both ways */
 #define LOG_CHUNK 8192         /* the most log text written at once */
 /* Raised when an update changes what an existing file should mean; settings_load updates older files:
  *   1: frame advance is off by default: off once in files from before (they all saved it on) */
@@ -67,6 +75,7 @@
 #define INPUT_PART_BUTTONS 4
 
 #define WATCH_LABEL_KEY "watch_label_" /* + <watch_t>=<name> */
+#define BIND_KEY "bind_"               /* + <command key>=<buttons> */
 
 /* Everything kept in the file. Compared byte by byte to tell when to save, so it's always
  * zeroed (padding too) before being filled. */
@@ -82,7 +91,7 @@ typedef struct {
   int32_t frame_advance;
   int32_t frame_advance_in_pause;
   int32_t pause_display;
-  int32_t frame_advance_button;
+  int32_t frame_advance_button; /* only read: from before the binds (frame advance's button, 1 = R) */
   int32_t menu_scale;
   int32_t input_display;
   int32_t input_display_bg;
@@ -90,6 +99,8 @@ typedef struct {
   int32_t input_style;
   int32_t input_size;
   int32_t input_position; /* input_corner (gfx_corner_t) */
+  int32_t input_attach;   /* GFX_ATTACH_* */
+  int32_t system_keyboard; /* swkbd_enabled */
   int32_t input_x, input_y;
   int32_t watches_shown;
   int32_t watches_header;
@@ -126,6 +137,8 @@ typedef struct {
   int32_t flag_log;
   int32_t flag_log_status;
   int32_t flag_log_story;
+  uint32_t binds[CMD_COUNT]; /* binds.h */
+  char archive_folder[SAVE_FOLDER_LEN]; /* where archive now puts them (savebackup.h) */
 } snapshot_t;
 
 static bool mounted;
@@ -169,13 +182,16 @@ static snapshot_t take_snapshot(void)
   s.frame_advance = frame_advance;
   s.frame_advance_in_pause = frame_advance_in_pause;
   s.pause_display = pause_display;
-  s.frame_advance_button = frame_advance_button;
+  memcpy(s.binds, binds, sizeof(s.binds));
+  snprintf(s.archive_folder, sizeof(s.archive_folder), "%s", savebackup_archive_folder());
   snprintf(s.lang, sizeof(s.lang), "%s", lang_code());
   s.input_display = input_display;
   s.input_display_bg = input_display_bg;
   s.input_style = input_style;
   s.input_size = input_size;
   s.input_position = input_corner;
+  s.input_attach = input_attach;
+  s.system_keyboard = swkbd_enabled;
   s.input_x = input_x;
   s.input_y = input_y;
   s.input_parts = input_show_left | input_show_right << 1 | input_show_buttons << 2;
@@ -248,7 +264,9 @@ static void apply_snapshot(const snapshot_t *s)
   frame_advance = s->frame_advance != 0;
   frame_advance_in_pause = s->frame_advance_in_pause != 0;
   pause_display = s->pause_display != 0;
-  frame_advance_button = s->frame_advance_button == 1;
+  savebackup_set_archive_folder(s->archive_folder);
+  for (int c = 0; c < CMD_COUNT; c++) /* a needed one left unbound (by hand): its default */
+    binds[c] = command_info[c].required && !bind_length(s->binds[c]) ? bind_default((command_t)c) : s->binds[c];
 
   input_display = s->input_display != 0;
   input_display_bg = s->input_display_bg != 0;
@@ -257,6 +275,9 @@ static void apply_snapshot(const snapshot_t *s)
     input_size = s->input_size;
   if (s->input_position >= 0 && s->input_position < GFX_NPLACES)
     input_corner = s->input_position;
+  if (s->input_attach >= GFX_ATTACH_OFF && s->input_attach <= GFX_ATTACH_BELOW)
+    input_attach = s->input_attach;
+  swkbd_enabled = s->system_keyboard != 0;
   if (s->input_x >= 0 && s->input_x <= WATCH_POS_MAX && s->input_y >= 0 && s->input_y <= WATCH_POS_MAX) {
     input_x = s->input_x;
     input_y = s->input_y;
@@ -368,6 +389,8 @@ static const struct { const char *key; size_t field_offset; } int_keys[] = {
   INT_KEY("input_display_style", input_style),
   INT_KEY("input_display_size", input_size),
   INT_KEY("input_display_position", input_position),
+  INT_KEY("input_display_attach", input_attach),
+  INT_KEY("system_keyboard", system_keyboard),
   INT_KEY("input_display_x", input_x),
   INT_KEY("input_display_y", input_y),
   INT_KEY("input_display_parts", input_parts),
@@ -450,6 +473,22 @@ static void parse_watch_label(const char *p, snapshot_t *s)
     snprintf(s->watch_labels[watch], sizeof(s->watch_labels[watch]), "%s", p + 1);
 }
 
+static bool advance_bind_read; /* the file has bind_advance (else frame_advance_button may say R) */
+
+/* "bind_<key>=<buttons>"; `p` is just after the prefix. A bind that isn't one is ignored (the default stays). */
+static void parse_bind(const char *p, snapshot_t *s)
+{
+  for (int c = 0; c < CMD_COUNT; c++) {
+    const char *value;
+    uint32_t bind;
+    if (key_is(p, command_keys[c], &value) && bind_parse(value, &bind)) {
+      s->binds[c] = bind;
+      advance_bind_read |= c == CMD_ADVANCE;
+      return;
+    }
+  }
+}
+
 /* One line of the file into `s`; unknown keys are ignored. *have_list is set once a watch_list
  * line is seen, after which the old "watches" key is ignored. */
 static void parse_line(const char *line, snapshot_t *s, bool *have_list)
@@ -465,8 +504,12 @@ static void parse_line(const char *line, snapshot_t *s, bool *have_list)
     parse_watch_list(value, s);
   } else if (key_is(line, "language", &value)) {
     snprintf(s->lang, sizeof(s->lang), "%s", value);
+  } else if (key_is(line, "archive_folder", &value)) {
+    snprintf(s->archive_folder, sizeof(s->archive_folder), "%s", value);
   } else if (starts_with(line, WATCH_LABEL_KEY)) {
     parse_watch_label(line + sizeof(WATCH_LABEL_KEY) - 1, s);
+  } else if (starts_with(line, BIND_KEY)) {
+    parse_bind(line + sizeof(BIND_KEY) - 1, s);
   } else {
     for (size_t k = 0; k < N_INT_KEYS; k++) {
       if (key_is(line, int_keys[k].key, &value)) {
@@ -549,6 +592,12 @@ void settings_load(void)
   bool updated = got && s.settings_version < SETTINGS_VERSION;
   if (got && s.settings_version < 1)
     s.frame_advance = 0;
+  /* frame advance on R, from before the binds: its binds, R and R + L3 (saved in the new form below) */
+  bool fa_on_r = !advance_bind_read && s.frame_advance_button == 1;
+  if (fa_on_r) {
+    bind_parse("R", &s.binds[CMD_ADVANCE]);  /* not menu text */
+    bind_parse("R + L3", &s.binds[CMD_RUN]); /* not menu text */
+  }
 
   apply_snapshot(&s);
   last_saved = take_snapshot();
@@ -558,7 +607,9 @@ void settings_load(void)
     log_printf("settings: none yet (" SETTINGS_FILE ")");
   if (updated)
     log_printf("settings: updated from version %d to %d", (int)s.settings_version, SETTINGS_VERSION);
-  if (old || updated)
+  if (fa_on_r)
+    log_printf("settings: frame advance on R (frame_advance_button=1): bind_advance=R, bind_run=R + L3");
+  if (old || updated || fa_on_r)
     last_saved.cheats ^= 1; /* differs from now: written (to the new folder) at the next chance */
 }
 
@@ -594,13 +645,13 @@ static void save_settings_file(const snapshot_t *s)
                    (int)s->enemy_hp);
   if (n < (int)sizeof(buf))
     n += snprintf(buf + n, sizeof(buf) - n,
-                  "language=%s\nframe_advance=%d\nframe_advance_in_pause=%d\nframe_advance_button=%d\npause_display=%d\n"
+                  "language=%s\nframe_advance=%d\nframe_advance_in_pause=%d\npause_display=%d\n"
                   "menu_size=%d\n"
                   "input_display=%d\ninput_display_background=%d\ninput_display_parts=%d\n"
                   "input_display_style=%d\ninput_display_size=%d\ninput_display_position=%d\n"
                   "input_display_x=%d\ninput_display_y=%d\nmenu_style=%d\nhide_in_game_menus=%d\nhide_over_item_wheel=%d\nsave_backups=%d\nsave_backup_location=%d\nsave_backup_kinds=%d\nflag_log=%d\n"
                   "flag_log_player_status=%d\nflag_log_story=%d\n",
-                  s->lang, (int)s->frame_advance, (int)s->frame_advance_in_pause, (int)s->frame_advance_button, (int)s->pause_display,
+                  s->lang, (int)s->frame_advance, (int)s->frame_advance_in_pause, (int)s->pause_display,
                   (int)s->menu_scale, (int)s->input_display, (int)s->input_display_bg, (int)s->input_parts,
                   (int)s->input_style, (int)s->input_size, (int)s->input_position, (int)s->input_x,
                   (int)s->input_y, (int)s->menu_style, (int)s->hide_in_game_menus, (int)s->hide_over_item_wheel,
@@ -610,9 +661,17 @@ static void save_settings_file(const snapshot_t *s)
   if (n < (int)sizeof(buf))
     n += snprintf(buf + n, sizeof(buf) - n,
                   "voids_shown=%d\nvoids_ground=%d\nvoids_deadly=%d\nvoids_ring=%d\n"
-                  "voids_xray=%d\nvoids_areas=%d\n",
+                  "voids_xray=%d\nvoids_areas=%d\ninput_display_attach=%d\narchive_folder=%s\nsystem_keyboard=%d\n",
                   (int)s->voidmap_shown, (int)s->voidmap_ground, (int)s->voidmap_deadly, (int)s->voidmap_ring,
-                  (int)s->voidmap_xray, (int)s->voidmap_areas);
+                  (int)s->voidmap_xray, (int)s->voidmap_areas, (int)s->input_attach, s->archive_folder,
+                  (int)s->system_keyboard);
+  for (int c = 0; c < CMD_COUNT && n < (int)sizeof(buf); c++) {
+    char name[48];
+    bind_name(s->binds[c], name, sizeof(name));
+    if (!bind_length(s->binds[c]))
+      snprintf(name, sizeof(name), "unbound"); /* in English whatever the language: read back by bind_parse */
+    n += snprintf(buf + n, sizeof(buf) - n, BIND_KEY "%s=%s\n", command_keys[c], name);
+  }
   for (int w = 0; w < W_COUNT && n < (int)sizeof(buf); w++)
     if (s->watch_labels[w][0])
       n += snprintf(buf + n, sizeof(buf) - n, WATCH_LABEL_KEY "%d=%s\n", w, s->watch_labels[w]);
@@ -673,8 +732,10 @@ void settings_frame(bool menu_open)
   if (!mounted)
     return;
   frames_since_save++;
-  if (menu_open || frames_since_save < SAVE_GAP_FRAMES)
+  /* a changed bind is saved without waiting for the menu to close: it may be quit with the menu open */
+  if ((menu_open && !binds_changed) || frames_since_save < SAVE_GAP_FRAMES)
     return;
+  binds_changed = false;
   snapshot_t now = take_snapshot();
   if (!same_bytes(&now, &last_saved, sizeof(now))) {
     save_settings_file(&now);

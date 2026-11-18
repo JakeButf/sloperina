@@ -102,6 +102,20 @@ struct z64hd_build {
   uint32_t event_flows;
   /* Link's ragdoll (ragdoll.c, FINDINGS 9.9); 0: not known for this build */
   uint32_t ragdoll_controller;   /* controller (object): Link's ragdoll controller, NULL if he has none */
+  /* the saves' captions the Load list shows (savebackup.c, FINDINGS 9.11): [main+caption_mgr_ptr] the CaptionMgr;
+   * caption_empty (mgr): empties its entries, state 0; caption_request (mgr): the game's load request (checks
+   * its save reader is free, then sets +0x8D bit 0). 0: not known for this build (the list waits for a restart) */
+  uint32_t caption_mgr_ptr;
+  uint32_t caption_empty;
+  uint32_t caption_request;
+  uint32_t caption_update; /* (mgr): the CaptionMgr's per-frame update, which reads the captions a step at a time */
+  uint32_t caption_empty_entry; /* (entry, index in its list, bool master quest list): empties one entry, state 0 */
+  /* the pause screen's Load list, to refresh it in place (FINDINGS 9.11): its screen's vtable (UISystemLoadList,
+   * +0x2B0 its list), the list's "hide every row" (void (list)), and the "Load this save?" screen's vtable; 0: not
+   * known (the list shows the restored saves once it's opened again) */
+  uint32_t vt_load_list;
+  uint32_t load_list_hide_rows;
+  uint32_t vt_save_load_confirm;
   struct z64hd_link_path link_paths[5];
 };
 

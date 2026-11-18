@@ -25,6 +25,8 @@
 #include "menu.h"
 #include "menus.h"
 #include "airwall.h"
+#include "binds.h"
+#include "lang.h"
 #include "enemyhp.h"
 #include "flaglog.h"
 #include "savebackup.h"
@@ -58,19 +60,17 @@ typedef uint64_t (*gd_unlock_t)(void *lock);
 static bool started;
 static uint32_t frames_run;
 
-#define MENU_COMBO (BTN_R | BTN_RS_DOWN) /* gz: R + C-down */
-#define BACK_COMBO (BTN_R | BTN_DLEFT)   /* up one level; closes at the top */
-#define BACK_BUTTON BTN_B
 
 /* --- frame advance ---------------------------------------------------------------------------
- * With it on (settings > frame advance), a tap of its button (L or R, menu closed) pauses the game:
- * this hook, on the game's thread, holds it here, as a debugger's breakpoint would. While held, a
- * tap lets one frame through, and the button + L3 lets it run again; the menu still opens (R + right
- * stick down) and works as usual. gz's pause icon shows at the top left. The game never sees the
- * button while it's on.
+ * With it on (settings > frame advance), a tap of its command (binds.h CMD_ADVANCE, L unless changed in
+ * settings > rebind commands; menu closed) pauses the game: this hook, on the game's thread, holds it here, as a
+ * debugger's breakpoint would. While held, a tap lets one frame through, and the run command (L + L3) lets it
+ * run again; the menu still opens and works as usual. gz's pause icon shows at the top left. A bind of one
+ * button is never seen by the game while it's on.
  * As in gz, everything else can be held or pressed meanwhile (the stick, A, Z...): the frame let
- * through reads the controller as it is, plus what was buffered while paused. Only R's shortcuts
- * (R + right stick down, R + d-pad...) don't count as a tap, so they don't pause the game; L has none.
+ * through reads the controller as it is, plus what was buffered while paused. A press that another button
+ * cancels (a shortcut that starts with the same button, e.g. R + d-up with frame advance on R) isn't a tap,
+ * so it doesn't pause the game.
  * While the game's own pause is on (its pause screen or an item menu), the button is left to the game
  * and can't start frame advance, unless "in pause screen" is ticked (frame_advance_in_pause; off by
  * default). Once paused by frame advance, stepping into the pause screen still works as before.
@@ -80,10 +80,9 @@ bool frame_advance_in_pause = false;
 bool pause_display = true;
 bool hide_in_game_menus = true;
 bool hide_over_item_wheel = false;
-int frame_advance_button; /* 0 L, 1 R */
 
-/* settings > hide in game menus: the game's own menus (Plus, Minus) are open, or opening (from the frame
- * after they start to fade in). settings > hide over item wheel: the item wheel, which pauses the same way
+/* settings > menu settings > hide in game menus: the game's own menus (Plus, Minus) are open, or opening (from the frame
+ * after they start to fade in). settings > menu settings > hide over item wheel: the item wheel, which pauses the same way
  * but shows no menu screen (FINDINGS §9.1). gfx_frame keeps the HUD shown while sloperinaGZ's menu is open
  * (it can be moved then). */
 static bool hud_hidden(void)
@@ -124,18 +123,9 @@ typedef enum {
   FA_REPEAT = 3, /* held while paused: another frame */
 } fa_event_t;
 
-static uint32_t fa_button_bit(void) { return frame_advance_button ? BTN_R : BTN_L; }
-
-/* What, held or pressed with the button, makes it a shortcut rather than a tap. */
-static uint32_t fa_shortcut_keys(void)
-{
-  return frame_advance_button ? (BTN_DUP | BTN_DDOWN | BTN_DLEFT | BTN_DRIGHT | BTN_RS_DOWN) : 0;
-}
-
 static fa_event_t fa_read_button(void)
 {
-  uint32_t button = fa_button_bit();
-  uint32_t pressed = input_pressed();
+  uint32_t button = cmd_mask(CMD_ADVANCE);
   uint32_t held = input_held();
   uint64_t ticks_per_ms = sys_tick_freq() / 1000;
   uint64_t now = sys_tick();
@@ -152,24 +142,24 @@ static fa_event_t fa_read_button(void)
     fa_blocked_after_menu = false;
   }
 
-  if (pressed & button) {
+  if (cmd_pressed(CMD_RUN)) {
+    fa_not_a_tap = true;
+    return FA_RUN;
+  }
+  if (cmd_pressed(CMD_ADVANCE)) {
     fa_button_down = true;
-    fa_not_a_tap = (held & fa_shortcut_keys()) != 0;
+    fa_not_a_tap = false;
     fa_button_down_at = sys_tick();
     fa_repeating = false;
   }
   if (!fa_button_down)
     return FA_NOTHING;
-
-  bool run_combo_pressed = (pressed & button) || (pressed & BTN_LSTICK);
-  if ((held & button) && (held & BTN_LSTICK) && run_combo_pressed) {
-    fa_not_a_tap = true;
-    return FA_RUN;
-  }
-  if (pressed & fa_shortcut_keys())
+  if (cmd_cancelled(CMD_ADVANCE)) /* another button: a shortcut, or the run command */
     fa_not_a_tap = true;
 
-  if (!(held & button)) {
+  if (!cmd_active(CMD_ADVANCE)) {
+    if (fa_not_a_tap && (held & button))
+      return FA_NOTHING; /* after a shortcut: over once its buttons are let go */
     bool tap = !fa_not_a_tap && !fa_repeating; /* a hold already advanced: no extra frame */
     fa_button_down = false;
     fa_repeating = false;
@@ -187,14 +177,28 @@ static fa_event_t fa_read_button(void)
   return FA_NOTHING;
 }
 
+/* Which commands apply (binds_set_enabled), before the controller is read: the menu's own while it's open, the
+ * rest while it's closed; frame advance's while it's on (run also with the menu open: it's how a paused game
+ * goes on); levitate's toggle while levitate is. Showing the menu always. */
+static void command_context(void)
+{
+  bool open = menu_current != 0;
+  for (int c = 0; c < CMD_COUNT; c++)
+    binds_set_enabled((command_t)c, command_info[c].group == CMD_GROUP_MENU ? open : !open);
+  binds_set_enabled(CMD_MENU, true);
+  binds_set_enabled(CMD_ADVANCE, frame_advance && !open);
+  binds_set_enabled(CMD_RUN, frame_advance);
+  binds_set_enabled(CMD_LEVITATE, levitate_enabled && !open);
+}
+
 /* Opens, closes and drives the menu. Returns true if the input was the menu's. */
 static bool menu_controls(void)
 {
-  if (!menu_current && input_combo(MENU_COMBO))
+  if (!menu_current && cmd_pressed(CMD_MENU))
     menu_open(&menu_root);
-  else if (menu_current && input_combo(MENU_COMBO))
-    menu_close(); /* the open combo toggles it */
-  else if (menu_current && (input_combo(BACK_COMBO) || (input_pressed() & BACK_BUTTON)))
+  else if (menu_current && cmd_pressed(CMD_MENU))
+    menu_close(); /* the open command toggles it */
+  else if (menu_current && (cmd_pressed(CMD_RETURN) || cmd_pressed(CMD_BACK)))
     menu_back();
   else if (menu_current) {
     watches_sync();
@@ -205,8 +209,8 @@ static bool menu_controls(void)
 }
 
 /* What's pressed while paused is buffered and given to the game on the frame that's let through:
- * every button pressed (not the frame advance button, nor L3 pressed with it), and each stick's last
- * direction away from the middle. */
+ * every button pressed (not frame advance's, nor the run command's while they're all held), and each
+ * stick's last direction away from the middle. */
 #define FA_DEADZONE 6000
 #define BUTTON_BITS 0xFFFF /* the buttons, not the stick-direction bits above them */
 
@@ -219,10 +223,9 @@ static void fa_buffer_input(void)
   if (menu_current) /* what's pressed for the menu isn't for the game */
     return;
   uint32_t held = input_held();
-  uint32_t button = fa_button_bit();
-  uint32_t for_game = held & ~button & BUTTON_BITS;
-  if (held & button)
-    for_game &= ~BTN_LSTICK; /* L3 with the button means "run", not something for the game */
+  uint32_t for_game = held & ~cmd_mask(CMD_ADVANCE) & BUTTON_BITS;
+  if (cmd_held(CMD_RUN))
+    for_game &= ~cmd_mask(CMD_RUN); /* "run", not something for the game */
   buffered_buttons |= for_game;
 
   int32_t axes[4];
@@ -270,13 +273,11 @@ static void fa_hold_game(void)
   for (;;) {
     sys_sleep_ns(FA_POLL_NS);
     sys_frame();
+    command_context();
     input_update();
-    /* The button + L3 always runs again, even with the menu open (it would take the button), checked
+    /* The run command always runs again, even with the menu open (it may share a button with it), checked
      * before the menu gets it. Without our presents a menu opened here can't be seen: it's closed. */
-    uint32_t held = input_held();
-    uint32_t pressed = input_pressed();
-    uint32_t button = fa_button_bit();
-    if ((held & button) && (held & BTN_LSTICK) && (pressed & (button | BTN_LSTICK))) {
+    if (cmd_pressed(CMD_RUN)) {
       if (menu_current && !shown)
         menu_close();
       fa_button_down = false;
@@ -339,13 +340,17 @@ static void fa_frame(void)
     fa_menu_closed_at = sys_tick();
     return;
   }
-  input_hide_from_game |= fa_button_bit();
+  if (bind_length(binds[CMD_ADVANCE]) == 1) /* a combo's buttons stay the game's */
+    input_hide_from_game |= cmd_mask(CMD_ADVANCE);
   if (!fa_paused)
     input_force_active = false;
   if (!fa_paused && fa_read_button() == FA_TAP) {
     fa_paused = true;
-    gfx_notice(frame_advance_button ? "frame advance: R a frame, R + L3 to run"
-                                    : "frame advance: L a frame, L + L3 to run");
+    char advance[48], run[48], notice[128];
+    bind_name(binds[CMD_ADVANCE], advance, sizeof(advance));
+    bind_name(binds[CMD_RUN], run, sizeof(run));
+    snprintf(notice, sizeof(notice), TF("frame advance: %s a frame, %s to run"), advance, run);
+    gfx_notice(notice);
     /* The game shows nothing new while it's held, so this frame is let through first, with the pause
      * icon on it: the screen shows the game is paused (and hasn't crashed). Held from the next one. */
     gfx_pause_icon = pause_display ? 1 : 0;
@@ -364,6 +369,7 @@ static void fa_frame(void)
 static void first_frame(void)
 {
   menus_build();
+  binds_reset(); /* the defaults, then the file's */
   settings_load();
   gamefont_load(); /* the game's type for the panels (nativeui.c); gz's pixel font if it can't */
   uishader_load(); /* the game's UI shader, to draw them on the GPU (gpuui.c) */
@@ -381,6 +387,7 @@ static void frame(void)
   frames_run++;
   sys_frame();
   flaglog_frame(false); /* what the game changed since the last frame, before this module changes anything */
+  command_context();
   input_update();
 
   fa_menu_was_open = menu_current != 0; /* an L that closes the menu isn't frame advance's */

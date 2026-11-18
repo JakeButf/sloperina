@@ -17,6 +17,7 @@
 
 #include <stddef.h>
 
+#include "binds.h"
 #include "font.h"
 #include "gamefont.h"
 #include "gameimage.h"
@@ -1049,7 +1050,23 @@ static const struct { const char *word; uint32_t glyph, other; } buttons[] = {
   { "L3", GF_LSTICK_PRESS, 0 }, { "R3", GF_RSTICK_PRESS, 0 },
   { "ZL", GF_BTN_ZL, 0 }, { "ZR", GF_BTN_ZR, 0 }, { "L", GF_BTN_L, 0 }, { "R", GF_BTN_R, 0 }, { "A", GF_BTN_A, 0 },
   { "B", GF_BTN_B, 0 }, { "X", GF_BTN_X, 0 }, { "Y", GF_BTN_Y, 0 },
+  /* binds.c's names for the rest (settings > rebind commands) */
+  { "plus", GF_PLUS, 0 }, { "minus", GF_MINUS, 0 }, { "rs-down", GF_RSTICK_DOWN, 0 }, /* not menu text */
+  { "ls-down", GF_LSTICK_DOWN, 0 }, { "rs-up", GF_RSTICK, 0 }, { "rs-left", GF_RSTICK, 0 }, /* not menu text */
+  { "rs-right", GF_RSTICK, 0 }, { "ls-up", GF_LSTICK, 0 }, { "ls-left", GF_LSTICK, 0 }, /* not menu text */
+  { "ls-right", GF_LSTICK, 0 }, /* not menu text */
 };
+
+/* a bind's button (binds.h: input.h's bit number) as a glyph; 0 for SL / SR, which have none */
+static uint32_t bind_glyph(int button)
+{
+  static const uint32_t glyphs[] = {
+    GF_BTN_A, GF_BTN_B, GF_BTN_X, GF_BTN_Y, GF_LSTICK_PRESS, GF_RSTICK_PRESS, GF_BTN_L, GF_BTN_R, GF_BTN_ZL,
+    GF_BTN_ZR, GF_PLUS, GF_MINUS, GF_DPAD_LEFT, GF_DPAD_UP, GF_DPAD_RIGHT, GF_DPAD_DOWN,
+    GF_LSTICK, GF_LSTICK, GF_LSTICK, GF_LSTICK_DOWN, GF_RSTICK, GF_RSTICK, GF_RSTICK, GF_RSTICK_DOWN,
+  };
+  return button >= 0 && button < (int)(sizeof(glyphs) / sizeof(glyphs[0])) ? glyphs[button] : 0;
+}
 
 /* the button the word (less an opening bracket and a closing ':', ',', ')' or '.') names: its glyph, 0 if
  * none (*other: a second one, as in "L/R"); *pre and *post: the characters around it */
@@ -1831,8 +1848,8 @@ static const gfx_panel_t *measured_panel;
 static uint32_t measured_hash;
 static float measured_value_right;
 
-/* the controls at the menu's foot, from x: L select, R + d-left return, R + right stick down close; drawn
- * or only measured; returns where they end */
+/* the controls at the menu's foot, from x: select, return and close as they're bound (binds.h; by default
+ * L, R + d-left, R + right stick down); drawn or only measured; returns where they end */
 static float draw_controls(mrow_t *r, float x, bool draw)
 {
   int text_h = (int)(row_fp[GFX_ROW_HINT].text * fp_px + 0.5f);
@@ -1840,8 +1857,8 @@ static float draw_controls(mrow_t *r, float x, bool draw)
   r->em = gamefont_em_for_height(GF_REGULAR, text_h);
   float cap = cap_height(GF_REGULAR, r->em);
   r->baseline = (int)((r->h + cap) / 2 + 0.5f);
-  static const struct { uint32_t first, second; const char *what; } controls[] = {
-    { GF_BTN_L, 0, "select" }, { GF_BTN_R, GF_DPAD_LEFT, "return" }, { GF_BTN_R, GF_RSTICK_DOWN, "close" },
+  static const struct { command_t cmd; const char *what; } controls[] = {
+    { CMD_SELECT, "select" }, { CMD_RETURN, "return" }, { CMD_MENU, "close" },
   };
   rgb_t dim = styles[GFX_DIM].colour, bright = styles[GFX_NORMAL].colour;
   float gap = r->em * 0.3f;
@@ -1852,13 +1869,25 @@ static float draw_controls(mrow_t *r, float x, bool draw)
     if (draw)
       draw_run(what, n, GF_REGULAR, r->em, (int)(x * 64), r->baseline, dim);
     x += gamefont_measure(GF_REGULAR, r->em, what, n) / 64.0f + gap;
-    x += button_glyph(r, controls[i].first, x, draw, bright);
-    if (controls[i].second) {
-      x += gap;
-      if (draw)
-        draw_run("+", 1, GF_REGULAR, r->em, (int)(x * 64), r->baseline, dim);
-      x += gamefont_measure(GF_REGULAR, r->em, "+", 1) / 64.0f + gap;
-      x += button_glyph(r, controls[i].second, x, draw, bright);
+    uint32_t bind = binds[controls[i].cmd];
+    for (int b = 0, n = bind_length(bind); b < n; b++) {
+      if (b) {
+        x += gap;
+        if (draw)
+          draw_run("+", 1, GF_REGULAR, r->em, (int)(x * 64), r->baseline, dim);
+        x += gamefont_measure(GF_REGULAR, r->em, "+", 1) / 64.0f + gap;
+      }
+      uint32_t glyph = bind_glyph(bind_button(bind, b));
+      if (glyph) {
+        x += button_glyph(r, glyph, x, draw, bright);
+      } else { /* SL / SR: by name */
+        char one[48];
+        bind_name((uint32_t)bind_button(bind, b) | 0xFFFFFF00u, one, sizeof(one)); /* that button alone */
+        int len = (int)__builtin_strlen(one);
+        if (draw)
+          draw_run(one, len, GF_REGULAR, r->em, (int)(x * 64), r->baseline, bright);
+        x += gamefont_measure(GF_REGULAR, r->em, one, len) / 64.0f;
+      }
     }
     end = x;
     x += r->em * 1.3f;
@@ -2780,6 +2809,8 @@ static void draw_menu_moving(const gfx_panel_t *panel, float x, float y, float w
   motion.drawn = now ? now : 1;
 }
 
+int nativeui_band_scale;
+
 bool nativeui_gpu_panel(const gfx_panel_t *panel, int x, int y, int w, int h, int scale, int opacity,
                         nui_legacy_fn legacy)
 {
@@ -2794,16 +2825,17 @@ bool nativeui_gpu_panel(const gfx_panel_t *panel, int x, int y, int w, int h, in
   gpu_fade = 1;
   /* (x, y, w, h) is the band's place (nativeui_gpu_size); gz's grid of the panel sits inside it */
   band_ext_t e = band_of(panel);
+  float band_px = nativeui_band_scale ? (float)nativeui_band_scale / NUI_SC_ONE : fp_px; /* its band's scale */
   float bw = (float)w, bh = (float)h;
   if (menu) /* the menu's band grows and shrinks from its corner (draw_menu_moving) */
     menu_band_size(panel, bw, bh, sys_tick(), &bw, &bh);
   if (menu && !panel->clear) /* the menu's box, as the game's info boxes */
     draw_box((float)x, (float)y, bw, bh, alpha);
   else if (!panel->clear) /* the watches' band (and the input display's, its background on), as the game's guide */
-    draw_band((float)x, (float)y, bw, bh, e.fl * fp_px, e.fr * fp_px, e.ft * fp_px, e.fb * fp_px, alpha);
-  x += (int)(e.l * fp_px + 0.5f);
+    draw_band((float)x, (float)y, bw, bh, e.fl * band_px, e.fr * band_px, e.ft * band_px, e.fb * band_px, alpha);
+  x += (int)(e.l * band_px + 0.5f);
   y += (int)(e.t * fp_px + 0.5f);
-  w -= (int)((e.l + e.r) * fp_px + 0.5f);
+  w -= (int)((e.l + e.r) * band_px + 0.5f);
   h -= (int)((e.t + e.b) * fp_px + 0.5f);
   if (w <= 0 || h <= 0)
     return true;

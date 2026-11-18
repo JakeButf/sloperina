@@ -5,6 +5,7 @@
 #include "airwall.h"
 #include "gamedata.h"
 #include "gfx.h"
+#include "binds.h"
 #include "input.h"
 #include "lang.h"
 #include "link.h"
@@ -97,6 +98,7 @@ bool watches_moving;
 bool watches_header = true;
 bool input_display;
 int input_corner = GFX_BOTTOM_LEFT;
+int input_attach = GFX_ATTACH_OFF;
 int input_x = 30, input_y = 800;
 bool input_moving;
 bool input_display_bg = true;
@@ -277,6 +279,7 @@ static void input_display_frame(bool menu_open, bool shown)
   if ((!input_display || menu_open) && !shown) /* hidden while the menu is open */
     return;
   gfx_input_place((gfx_corner_t)input_corner, input_x, input_y);
+  gfx_input_attach(input_attach);
   gfx_input_background(input_display_bg);
   static const uint8_t size_percent[3] = { 50, 75, 100 }; /* input_size: small, medium, large */
   gfx_input_scale(size_percent[input_size >= 0 && input_size < 3 ? input_size : 0]);
@@ -861,22 +864,22 @@ void watch_set_label(int index, const char *label)
 
 /* --- frame --------------------------------------------------------------------------------------- */
 
-/* gz's commands, while the menu is closed; the three-button ones first */
+/* gz's commands, while the menu is closed (binds.h: a bind inside another's, R + d-right in R + A + d-right,
+ * gives way to it) */
 static void command_input(void)
 {
-  uint32_t held = input_held();
-  if (input_combo(BTN_R | BTN_A | BTN_DLEFT)) {
+  if (cmd_pressed(CMD_TIMER)) {
     timer_toggle();
     gfx_notice("timer started/stopped");
-  } else if (input_combo(BTN_R | BTN_B | BTN_DLEFT)) {
+  } else if (cmd_pressed(CMD_RESET_TIMER)) {
     timer_reset();
     gfx_notice("timer reset");
-  } else if (input_combo(BTN_R | BTN_B | BTN_DRIGHT)) {
+  } else if (cmd_pressed(CMD_RESET_LAG)) {
     lag_reset();
     gfx_notice("lag counter reset");
-  } else if (input_combo(BTN_R | BTN_A | BTN_DRIGHT)) {
+  } else if (cmd_pressed(CMD_RESET_JS)) {
     gfx_notice(js_height_reset() ? "jump height reset" : "jump height: Link not found");
-  } else if (input_combo(BTN_R | BTN_DRIGHT) && !(held & (BTN_A | BTN_B))) {
+  } else if (cmd_pressed(CMD_WATCHES)) {
     watches_shown = !watches_shown;
     gfx_notice(watches_shown ? "watches shown" : "watches hidden");
   }

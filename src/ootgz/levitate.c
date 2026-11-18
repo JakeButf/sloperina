@@ -34,6 +34,7 @@
 #include "data.h"
 #include "gamedata.h"
 #include "gfx.h"
+#include "binds.h"
 #include "input.h"
 #include "link.h"
 #include "sys.h"
@@ -562,12 +563,17 @@ static void track_frozen(double cx, double cy, double cz, vec3f_t drawn)
   last_drawn = drawn;
 }
 
-/* X/B control height; neither, both or R3 hold the current height. */
+/* The rise and sink commands (X/B unless changed in settings > rebind commands) control height; neither, both or the
+ * hover command (R3) hold the current height. */
+static int vertical_input(void)
+{
+  return cmd_held(CMD_HOVER) ? 0 : cmd_held(CMD_RISE) - cmd_held(CMD_SINK);
+}
+
 static void steer(double dt)
 {
   float_clock += dt;
-  bool hold_height = input_held() & BTN_RSTICK;
-  int vertical = hold_height ? 0 : !!(input_held() & BTN_X) - !!(input_held() & BTN_B);
+  int vertical = vertical_input();
   double rise = levitate_speed > 0 ? levitate_speed : 4;
   double move = levitate_move_speed;
   if (!vertical || vel_y * vertical < 0)
@@ -632,8 +638,7 @@ static void float_step(double dt, bool menu_open)
   vec3f_t drawn;
   link_drawn_pos(&drawn);
   track_frozen(cx, cy, cz, drawn);
-  uint32_t buttons = input_held();
-  int vertical = buttons & BTN_RSTICK ? 0 : !!(buttons & BTN_X) - !!(buttons & BTN_B);
+  int vertical = vertical_input();
   bool descend_through_floor = !menu_open && levitate_through_walls && vertical < 0;
   if (cy > pos_y && !descend_through_floor && !cct_noclip_active())
     pos_y = cy;
@@ -1025,10 +1030,10 @@ static const airwall_t *exit_at_link(void)
 
 static const airwall_t *in_exit; /* this frame's exit_at_link, while Link's collision is (or would be) off */
 
-/* L3: start / stop */
+/* the levitate command (L3 unless changed): start / stop */
 static void handle_l3(bool menu_open)
 {
-  in_exit = (floating || phasing || (levitate_enabled && (input_pressed() & BTN_LSTICK)) || cheats[CHEAT_WALLS])
+  in_exit = (floating || phasing || (levitate_enabled && cmd_pressed(CMD_LEVITATE)) || cheats[CHEAT_WALLS])
               ? exit_at_link() : 0;
   if (in_exit && floating) {
     log_printf("levitate: in a loading zone (%s map, zone %d); collision back on", exit_map_name,
@@ -1043,7 +1048,7 @@ static void handle_l3(bool menu_open)
     drop();
   } else if (!levitate_enabled) {
     drop();
-  } else if (!menu_open && (input_pressed() & BTN_LSTICK)) {
+  } else if (!menu_open && cmd_pressed(CMD_LEVITATE)) {
     if (floating) {
       drop();
       gfx_notice("levitate off");
@@ -1238,8 +1243,9 @@ void levitate_frame(bool menu_open)
     cct_noclip_end();
   /* Update after toggles, failed searches and scene changes as well as normal steps.
    * Our input reads remain raw; only the game's HID wrappers mask these buttons. */
-  input_hide_from_game = (levitate_enabled ? BTN_LSTICK : 0) |
-                         (floating ? BTN_RSTICK | BTN_X | BTN_B : 0);
+  uint32_t toggle = bind_length(binds[CMD_LEVITATE]) == 1 ? cmd_mask(CMD_LEVITATE) : 0; /* a combo's stay */
+  input_hide_from_game = (levitate_enabled ? toggle : 0) |
+                         (floating ? cmd_mask(CMD_HOVER) | cmd_mask(CMD_RISE) | cmd_mask(CMD_SINK) : 0);
 }
 
 bool levitate_floating(void)

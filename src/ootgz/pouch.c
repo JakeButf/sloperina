@@ -145,6 +145,11 @@ static bool call_refresh(uintptr_t screen)
   return true;
 }
 
+uintptr_t ui_find_screen(uintptr_t vtable_off)
+{
+  return find_screen(pick_vtable, MAIN(vtable_off));
+}
+
 bool ui_refresh_now(uintptr_t vtable_off)
 {
   uintptr_t screen = find_screen(pick_vtable, MAIN(vtable_off));

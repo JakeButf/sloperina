@@ -21,7 +21,7 @@ Source: [github.com/PracticeROM/sloperina](https://github.com/PracticeROM/sloper
   [`THANKS.md`](THANKS.md): who made it and special thanks.
 
 Open the menu with **R + right stick down**. **L** selects, the D-pad moves and changes values, **R + D-left**
-goes back.
+goes back. As in gz, every control can be rebound in **settings > rebind commands**.
 
 ## Features
 
@@ -31,13 +31,17 @@ goes back.
 - **cheats**: infinite health, rupees, magic and ammo; 2x movement speed.
 - **inventory**: items, equipment, collection (upgrades, strength, scale, magic), bottles, quest items, songs,
   dungeon items and small keys, all through the game's own code where it needs it.
-- **equips**, **story** (quest stages, tutorials).
+- **equips**.
 - **watches**: gz's watch list: built-in watches (position, speed, angles, camera, input, timer, lag...) and
   memory watches, with display types, labels (gz's keyboard), show/hide, reordering and the wrench to see the value
   in memory; the box can go in any corner or anywhere.
-- **debug**: heap and gz's memory viewer (edit, add watches, follow pointers).
+- **save management**: a copy of the game's save folder on the SD card after each save, named and numbered
+  archives on demand, and restoring one in place of the save.
+- **story** (quest stages, tutorials).
+- **debug**: heap, gz's memory viewer (edit, add watches, follow pointers), flag logging and the log.
 - **settings**: language, menu size and background, the input display (gz's row or a Switch 2 Pro Controller),
-  levitate (L3 toggle, held X/B up/down, release to hover), frame advance (L or R) with gz's pause icons.
+  levitate (L3 toggle, held X/B up/down, release to hover), frame advance (L, L + L3 to run) with gz's pause icons, and gz's commands menu (**rebind commands**) to rebind every control
+  (the menu's own buttons too).
 - gz's log of what was done, bottom right.
 
 ## Layout

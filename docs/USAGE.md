@@ -34,8 +34,11 @@ The menu works like gz's: the D-pad moves, **L** selects.
 | **D-pad left / right** | Change a value (switches, numbers), or pick a button on a row of buttons |
 | **L** | Select: open a menu, tick a box, press a button |
 | **L held + D-pad left / right** | Change a number by 10 |
-| **R + D-pad left** | Go back one menu (at the top: close the menu) |
+| **R + D-pad left** or **B** | Go back one menu (at the top: close the menu) |
 | **return** (the last item) | Go back one menu |
+
+These are the defaults. **settings > rebind commands** changes any of them, and the shortcuts below: **L** on one, let go,
+press the new buttons in order, let go, then **L** to keep the new bind or **B** to cancel. **L held** unbinds it.
 
 The line at the bottom of the menu always tells you what the buttons do for the item you're on.
 
@@ -64,8 +67,8 @@ These work with the menu closed.
 | **L3** | Levitate: start floating / drop (when it's turned on in settings) |
 | **X / B** (held, while floating) | Levitate up / down; release to hover |
 | **R3** (held, while floating) | Hold height even if X/B is held |
-| **L** (or **R**) | Frame advance: pause, then one frame per tap, frames continuously while held (on at first; **settings > frame advance**) |
-| **L + L3** (or **R + L3**) | Frame advance: let the game run again |
+| **L** | Frame advance: pause, then one frame per tap, frames continuously while held (on at first; **settings > frame advance**) |
+| **L + L3** | Frame advance: let the game run again |
 
 Everything you do shows for a moment in the bottom-right corner (gz's log), for example `infinite magic on` or
 `warp to kokiri forest`.
@@ -126,7 +129,7 @@ the next frame.
 **settings > input display > show**. Choose **style: controller** for a picture of a Pro Controller, or **style: minimal** for a short line of button outlines that takes less of the screen.
 
 **...make the menu smaller?**
-**settings > size**: small, medium or large.
+**settings > menu settings > size**: small, medium or large.
 
 ## Things on the screen
 
@@ -152,12 +155,12 @@ the SD card in `sloperinaGZ/settings.ini`, plain text you can edit. Your game sa
 - **The game doesn't react to a button.** Frame advance takes **L** (or **R**) away from the game while it's on
   (except in the game's pause screen, unless **settings > frame advance > in pause screen** is on),
   levitate takes **L3**, plus **X/B/R3** while floating. Turn them off in **settings** if you need those buttons.
-- **The screen froze.** Frame advance may have paused the game: press **L + L3** (or **R + L3**).
+- **The screen froze.** Frame advance may have paused the game: press **L + L3** (or the **run again** command, if you changed it).
 - **Something I ticked didn't change in the game.** Some things only show after the game redraws them: open and
   close the pause screen, or go through a loading zone. Story stages apply after a loading zone.
 - **"settings won't be kept".** The game couldn't open the SD card; everything works, it just won't remember your
   settings.
 
-Still stuck? The **log** menu (on the main menu) lists what sloperinaGZ did and what went wrong (set **filter** to
+Still stuck? The **debug > log** menu lists what sloperinaGZ did and what went wrong (set **filter** to
 **problems**), and everything is also saved to `sloperinaGZ/log.txt` on the SD card: send that file with any
 problem report. The [manual](MANUAL.md) explains every option.
