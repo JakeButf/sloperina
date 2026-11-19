@@ -1400,4 +1400,8 @@ reads every slot's caption once, at boot, and keeps it.
   confirmation waits, and failure cleanup. Local execution of both native manager reset bodies with
   stubbed entry cleanup confirmed the 12 entry callbacks, shared fields and different MQ behavior.
   The local native probe skips PAC entry/exit; it does not validate real textures, save I/O or gameplay.
-  Console verification of 1.0.0 restore/refresh is pending. No new Lichii or 1.1.1 runtime test is claimed.
+  On a physical console running 1.0.0, two archive restores refreshed six changed slots in 38 frames
+  and one changed slot in 8 frames; the user confirmed the restored save loaded without restarting.
+  These runs used the console fork with the same reload-controller changes and address mappings.
+  Master Quest was covered by the host/native-reset checks, not a confirmed console run.
+  No new Lichii or 1.1.1 runtime test is claimed.
